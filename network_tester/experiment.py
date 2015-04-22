@@ -2,14 +2,16 @@
 
 import pkg_resources
 
+import struct
+
 from six import itervalues
 
 from rig.bitfield import BitField
 from rig.netlist import Net
-from rig.machine import Cores
+from rig.machine import Cores, SDRAM
 from rig.place_and_route import place, allocate, route
 from rig.place_and_route.constraints import ReserveResourceConstraint
-from rig.place_and_route.util import build_application_map, build_routing_tables
+from rig.place_and_route.utils import build_application_map, build_routing_tables
 
 from .network_node import NetworkNode
 
@@ -33,10 +35,10 @@ class Experiment(object):
         
         # Field which will contain a unique (though wrapping...) identifier code
         # for each packet sent.
-        self._keyspace.add_field("packet_id", 16, 0, tags="PacketID")
+        self._keyspace.add_field("seq_num", 16, 0, tags="SeqNum")
         
         # Field which identifies which traffic node produced a given packet.
-        self._keyspace.add_field("traffic_node", tags="Routing")
+        self._keyspace.add_field("traffic_node", 16, 16, tags="Routing")
         
         # Incrementing counter used to allocate keyspace "traffic_node" keys to
         # trafic nodes.
@@ -78,10 +80,10 @@ class Experiment(object):
             and `routing_tables` is of a type suitable for use with
             :py:meth:`rig.machine_control.MachineController.load_routing_tables`.
         """
-        self._keyspace.assign_fields()
-        
-        # Assign one core to each network node
-        vertices_resources = {nn: {Cores: 1} for nn in self.nns}
+        # Assign one core to each network node and enough SDRAM to store the
+        # network node config data plus a 32-bit size prefix.
+        vertices_resources = {nn: {Cores: 1, SDRAM: 4 + nn.get_config_data_size()}
+                              for nn in self.nns}
         
         # Create a net for each traffic node (though Nets must only refer to
         # network nodes)
@@ -94,7 +96,7 @@ class Experiment(object):
                 nets.append(net)
                 tn_to_net[tn] = net
         
-        # Don't allocate the monitor processor
+        # Don't allocate the core used as the monitor processor
         constraints = [ReserveResourceConstraint(Cores, slice(0, 1))]
         
         # Place-and-Route
@@ -126,6 +128,24 @@ class Experiment(object):
         return application_map, routing_tables
     
     
+    def _allocate_sdram(self):
+        """Allocate SDRAM blocks for network node configuration.
+        
+        Intialises the nn.sdram MemoryIO objects for each network node.
+        """
+        for nn in self.nns:
+            x, y, core = nn.location
+            nn.sdram = self.mc.sdram_alloc_as_filelike(
+                nn.get_config_data_size(), tag=core, x=x, y=y)
+    
+    
+    def _load_sdram(self):
+        """Load SDRAM blocks with network node configuration data."""
+        for nn in self.nns:
+            nn.sdram.seek(0)
+            written = nn.sdram.write(nn.get_config_data())
+            assert written == nn.get_config_data_size()
+    
     def run(self, duration):
         """Load the experiment onto the machine and run it.
         
@@ -135,7 +155,14 @@ class Experiment(object):
         """
         # TODO
         raise NotImplementedError()
-    
+        
+        application_map, routing_tables = self._place_and_route()
+        self.mc.load_routing_tables(routing_tables)
+        self._allocate_sdram()
+        self._load_sdram()
+        self.mc.load_application(application_map)
+        
+        # TODO: wait until experiment is complete
     
     @property
     def num_sent(self):

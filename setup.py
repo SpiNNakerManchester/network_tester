@@ -12,6 +12,6 @@ setup(
     license="GPLv2",
 
     # Requirements
-    install_requires=["six", "rig"],
+    install_requires=["six", "rig", "enum34"],
     tests_require=["pytest>=2.6", "pytest-cov", "mock"],
 )
