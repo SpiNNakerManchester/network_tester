@@ -40,7 +40,7 @@ def test_new_traffic_node(nn):
         assert set(tn.sinks) == set()
 
 
-def test_get_config_data_empty(nn):
+def test_get_config_data(nn):
     # Check config data when empty
     data = nn.get_config_data()
     assert data == (

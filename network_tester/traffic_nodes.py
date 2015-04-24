@@ -21,8 +21,8 @@ class TrafficNode(object):
                                  "I"     # bool payload;
                                  "I"     # uint32_t num_sent;
                                  "I"     # size_t num_sources;
-                                 "I"     # traffic_node_source_t *sources;
-                                 "24B")  # union {...} data;
+                                 "I")    # traffic_node_source_t *sources;
+    traffic_node_spec_t_union_size = 24
 
     traffic_node_source_t = Struct("<"   # (Little-endian)
                                    "I"   # uint32_t key;
@@ -85,9 +85,12 @@ class TrafficNode(object):
             len(self.sources),
             # The array of traffic_node_source_t will be placed immediately
             # after this struct
-            TrafficNode.traffic_node_spec_t.size,
-            *(data_field.ljust(24, b'\x00'))
-        )
+            (TrafficNode.traffic_node_spec_t.size +
+             TrafficNode.traffic_node_spec_t_union_size))
+        
+        # Add union data
+        data += data_field.ljust(TrafficNode.traffic_node_spec_t_union_size,
+                                 b'\x00')
         
         # Populate the array of traffic source nodes and initialise counters to zero
         for source in sorted(self.sources, key=(lambda s:
@@ -100,6 +103,7 @@ class TrafficNode(object):
     def get_config_data_size(self):
         """Get the number of bytes required to store this traffic node."""
         return (TrafficNode.traffic_node_spec_t.size +
+                TrafficNode.traffic_node_spec_t_union_size +
                 (TrafficNode.traffic_node_source_t.size * len(self.sources)))
     
     @property
