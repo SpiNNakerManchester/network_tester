@@ -113,7 +113,8 @@ class Experiment(object):
             nn.location = (x, y, core)
         
         # Build application map to facilitate the loading of binaries
-        binary = pkg_resources.resource_filename("network_tester", "binaries/rig_test.aplx")
+        binary = pkg_resources.resource_filename(
+            "network_tester", "binaries/network_tester.aplx")
         application_map = build_application_map({nn: binary for nn in self.nns},
                                                 placements, allocations)
         
@@ -153,10 +154,8 @@ class Experiment(object):
         ----------
         duration : float
         """
-        # TODO
-        raise NotImplementedError()
-        
-        application_map, routing_tables = self._place_and_route()
+        machine = self.mc.get_machine()
+        application_map, routing_tables = self._place_and_route(machine)
         self.mc.load_routing_tables(routing_tables)
         self._allocate_sdram()
         self._load_sdram()

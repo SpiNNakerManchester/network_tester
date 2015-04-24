@@ -88,7 +88,7 @@ def test__place_and_route(e, machine):
     
     # Every core should be used (less monitor cores)
     binary = pkg_resources.resource_filename("network_tester",
-                                             "binaries/rig_test.aplx")
+                                             "binaries/network_tester.aplx")
     assert application_map == {binary: {  # pragma: no branch
         (x, y): set(range(1, machine.chip_resources[Cores]))
         for x in range(machine.width)
