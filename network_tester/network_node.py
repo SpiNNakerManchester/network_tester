@@ -8,6 +8,7 @@ class NetworkNode(object):
     
     network_node_spec_t = Struct("<"   # (Little-endian)
                                  "I"   # uint32_t key_seq_mask;
+                                 "I"   # uint32_t duration;
                                  "I"   # size_t num_traffic_nodes;
                                  "I")  # traffic_node_spec_t **traffic_nodes;
     
@@ -60,6 +61,7 @@ class NetworkNode(object):
         
         data = NetworkNode.network_node_spec_t.pack(
             self.experiment._keyspace.get_mask(field="seq_num"),
+            int(self.experiment.duration * 1000000),
             len(self.tns),
             # The array of pointers to traffic node configs start immediately
             # after the network node block

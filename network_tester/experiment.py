@@ -6,6 +6,8 @@ import struct
 
 from six import itervalues
 
+import time
+
 from rig.bitfield import BitField
 from rig.netlist import Net
 from rig.machine import Cores, SDRAM
@@ -46,6 +48,9 @@ class Experiment(object):
         
         # A list of the network node objects involved in the experiment
         self.nns = []
+        
+        # Duration of the last experiment run (seconds)
+        self.duration = 0.0
     
     def _get_traffic_node_key(self):
         """Produce a new BitField with a unique traffic_node value."""
@@ -153,7 +158,10 @@ class Experiment(object):
         Parameters
         ----------
         duration : float
+            Seconds to run the experiment for.
         """
+        self.duration = duration
+        
         machine = self.mc.get_machine()
         application_map, routing_tables = self._place_and_route(machine)
         self.mc.load_routing_tables(routing_tables)
@@ -161,7 +169,9 @@ class Experiment(object):
         self._load_sdram()
         self.mc.load_application(application_map)
         
-        # TODO: wait until experiment is complete
+        # Wait for the experiment to complete
+        time.sleep(duration)
+        self.mc.wait_for_cores_to_reach_state("exit", len(self.nns))
     
     @property
     def num_sent(self):

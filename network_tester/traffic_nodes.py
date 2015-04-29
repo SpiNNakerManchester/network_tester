@@ -22,13 +22,13 @@ class TrafficNode(object):
                                  "I"     # uint32_t num_sent;
                                  "I"     # size_t num_sources;
                                  "I")    # traffic_node_source_t *sources;
-    traffic_node_spec_t_union_size = 24
+    traffic_node_spec_t_union_size = 12
 
     traffic_node_source_t = Struct("<"   # (Little-endian)
                                    "I"   # uint32_t key;
                                    "I"   # uint32_t num_received;
-                                   "I"   # uint32_t num_received_with_payload;
-                                   "I")  # uint32_t num_out_of_order;
+                                   "I"   # uint32_t num_out_of_order;
+                                   "I")  # uint32_t last_seq_num;
 
     def __init__(self, payload=False):
         """Create a TrafficNode instance.
@@ -162,10 +162,7 @@ class BernoulliNode(TrafficNode):
     
     data_struct = Struct("<"   # (Little-endian)
                          "d"   # double probability;
-                         "I"   # uint32_t period;
-                         "I"   # uint32_t phase;
-                         "I"   # uint32_t num_packets;
-                         "I")  # uint32_t packet_interval;
+                         "I")  # uint32_t period;
     
     def __init__(self, period, probability=1.0, phase=0.0, num_packets=1,
                  packet_interval=0.0, payload=False):
@@ -177,30 +174,14 @@ class BernoulliNode(TrafficNode):
             Number of seconds between possibly sending out a packet.
         probability : float
             Probability of a packet being sent each period seconds. 0-1.
-        phase : float
-            Phase offset for the Bernoulli period. (Must be +ve)
-        num_packets : int
-            Number of packet to send when the period elapses and the random
-            distribution determines that a packet will be sent.
-        packet_interval : float
-            Number of seconds between the sending of each of the num_packets to be
-            sent.
-        payload : bool
-            Should a payload be included with each packet?
         """
         super(BernoulliNode, self).__init__(payload)
         
         assert period > 0.0
         assert 0.0 <= probability <= 1.0
-        assert num_packets >= 1
-        assert 0.0 <= packet_interval <= (period / num_packets)
-        assert 0.0 <= phase <= period
         
         self.period = period
         self.probability = probability
-        self.phase = phase
-        self.num_packets = num_packets
-        self.packet_interval = packet_interval
     
     
     def get_config_data(self):
@@ -217,10 +198,7 @@ class BernoulliNode(TrafficNode):
             return int(s * 1000.0 * 1000.0)
         
         data = BernoulliNode.data_struct.pack(self.probability,
-                                              to_us(self.period),
-                                              to_us(self.phase),
-                                              self.num_packets,
-                                              to_us(self.packet_interval))
+                                              to_us(self.period))
         
         return super(BernoulliNode, self).get_config_data(
             TrafficNodeType.bernoulli, data)

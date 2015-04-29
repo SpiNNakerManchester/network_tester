@@ -65,10 +65,10 @@ def test_TrafficNode_get_config_data(e, nn):
         b"\x00\x00\x00\x00"  # payload (False)
         b"\x00\x00\x00\x00"  # num_sent (0)
         b"\x00\x00\x00\x00"  # num_sources (0)
-        b"\x30\x00\x00\x00"  # sources (end of struct)
-        + (b"\x00"*24)
+        b"\x24\x00\x00\x00"  # sources (end of struct)
+        + (b"\x00"*12)
     )
-    assert tn1.get_config_data_size() == len(data) == 48
+    assert tn1.get_config_data_size() == len(data) == 36
     
     data = tn2.get_config_data(0xAB, b"hi")
     assert data == (
@@ -77,10 +77,10 @@ def test_TrafficNode_get_config_data(e, nn):
         b"\x01\x00\x00\x00"  # payload (True)
         b"\x00\x00\x00\x00"  # num_sent (0)
         b"\x00\x00\x00\x00"  # num_sources (0)
-        b"\x30\x00\x00\x00"  # sources (end of struct)
-        b"hi" + (b"\x00"*22)
+        b"\x24\x00\x00\x00"  # sources (end of struct)
+        b"hi" + (b"\x00"*10)
     )
-    assert tn2.get_config_data_size() == len(data) == 48
+    assert tn2.get_config_data_size() == len(data) == 36
     
     data = tn3.get_config_data(0xAB, b"")
     assert data == (
@@ -89,8 +89,8 @@ def test_TrafficNode_get_config_data(e, nn):
         b"\x00\x00\x00\x00"  # payload (False)
         b"\x00\x00\x00\x00"  # num_sent (0)
         b"\x02\x00\x00\x00"  # num_sources (2)
-        b"\x30\x00\x00\x00"  # sources (end of struct)
-        + (b"\x00"*24) +
+        b"\x24\x00\x00\x00"  # sources (end of struct)
+        + (b"\x00"*12) +
         # Source 1 (tn1)
         b"\x00\x00\x00\x00"  # Key (ID = 0)
         b"\x00\x00\x00\x00"  # num_received (0)
@@ -102,7 +102,7 @@ def test_TrafficNode_get_config_data(e, nn):
         b"\x00\x00\x00\x00"  # num_received_with_payload (0)
         b"\x00\x00\x00\x00"  # num_out_of_order (0)
     )
-    assert tn3.get_config_data_size() == len(data) == 48 + 16 + 16
+    assert tn3.get_config_data_size() == len(data) == 36 + 16 + 16
 
 
 def test_BernoulliNode_get_config_data(e, nn):
@@ -121,14 +121,11 @@ def test_BernoulliNode_get_config_data(e, nn):
         b"\x01\x00\x00\x00"                  # payload (True)
         b"\x00\x00\x00\x00"                  # num_sent (0)
         b"\x00\x00\x00\x00"                  # num_sources (0)
-        b"\x30\x00\x00\x00"                  # sources (end of struct)
+        b"\x24\x00\x00\x00"                  # sources (end of struct)
         b"\x00\x00\x00\x00\x00\x00\xE0\x3F"  # probability
         b"\xE8\x03\x00\x00"                  # period
-        b"\xF4\x01\x00\x00"                  # phase
-        b"\x0A\x00\x00\x00"                  # num_packets
-        b"\x01\x00\x00\x00"                  # packet_interval
     )
-    assert tn.get_config_data_size() == len(data) == 48
+    assert tn.get_config_data_size() == len(data) == 36
 
 
 def test_RelayNode_get_config_data(e, nn):
@@ -142,7 +139,7 @@ def test_RelayNode_get_config_data(e, nn):
         b"\x01\x00\x00\x00"  # payload (True)
         b"\x00\x00\x00\x00"  # num_sent (0)
         b"\x00\x00\x00\x00"  # num_sources (0)
-        b"\x30\x00\x00\x00"  # sources (end of struct)
-        + (b"\x00"*24)
+        b"\x24\x00\x00\x00"  # sources (end of struct)
+        + (b"\x00"*12)
     )
-    assert tn.get_config_data_size() == len(data) == 48
+    assert tn.get_config_data_size() == len(data) == 36

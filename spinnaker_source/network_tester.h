@@ -9,6 +9,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifndef MIN
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+
+#ifndef MAX
+#define MAX(a, b) (((a) < (b)) ? (b) : (a))
+#endif
+
 /**
  * The granularity of all time related measurements in microseconds.
  */
@@ -39,14 +47,15 @@ typedef struct traffic_node_source {
 	uint32_t num_received;
 	
 	/**
-	 * Number of packets received with a payload.
-	 */
-	uint32_t num_received_with_payload;
-	
-	/**
 	 * Of the above counts, how many packets arrived out of order.
 	 */
 	uint32_t num_out_of_order;
+	
+	/**
+	 * The last sequence number of an arriving packet. Used to count the number of
+	 * out-of-order requests.
+	 */
+	uint32_t last_seq_num;
 } traffic_node_source_t;
 
 
@@ -92,7 +101,7 @@ typedef struct traffic_node_spec {
 	 */
 	union {
 		/**
-		 * When type=TN_BERNOULLI, this contains the parameters to a Bernouli
+		 * When type=TN_BERNOULLI, this contains the parameters to a Bernoulli
 		 * traffic model.
 		 */
 		struct {
@@ -101,16 +110,6 @@ typedef struct traffic_node_spec {
 			
 			// Number of microseconds between iterations of the traffic generator.
 			uint32_t period;
-			
-			// Phase offset for the Bernoulli period (microseconds)
-			uint32_t phase;
-			
-			// Number of packets to send when the packet generator decides to send a
-			// packet
-			uint32_t num_packets;
-			
-			// Number of microseconds between sending each of the num_packets
-			uint32_t packet_interval;
 		} bernoulli;
 		
 		/**
@@ -135,6 +134,11 @@ typedef struct network_node_spec {
 	uint32_t key_seq_mask;
 	
 	/**
+	 * Number of microseconts to run the experiment for.
+	 */
+	uint32_t duration;
+	
+	/**
 	 * The number of traffic nodes this network node implements.
 	 */
 	size_t num_traffic_nodes;
@@ -144,6 +148,27 @@ typedef struct network_node_spec {
 	 */
 	traffic_node_spec_t **traffic_nodes;
 } network_node_spec_t;
+
+
+/**
+ * Generate and send a packet on behalf of the specified traffic source.
+ */
+void send_packet(network_node_spec_t *network_node,
+                 traffic_node_spec_t *traffic_node);
+
+
+/**
+ * Get the timer tick interval which would best suit the set of Bernoulli
+ * traffic nodes in this network node. If no such nodes are present, returns 0.
+ */
+uint get_bernoulli_tick_interval(network_node_spec_t *network_node);
+
+
+/**
+ * Run a single timestep of a Bernoulli traffic node.
+ */
+void bernoulli_tick(network_node_spec_t *network_node,
+                    traffic_node_spec_t *traffic_node);
 
 
 #endif
