@@ -18,7 +18,7 @@ def mock_mc():
 @pytest.fixture
 def e(mock_mc):
     e = Experiment(mock_mc)
-    e.duration = 255
+    e.duration = 0.000255
     return e
 
 @pytest.fixture
