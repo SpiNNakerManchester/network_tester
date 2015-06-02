@@ -44,9 +44,9 @@ def test_new_traffic_node(nn):
         assert set(tn.sinks) == set()
 
 
-def test_get_config_data(nn):
+def test__get_nn_config_data(nn):
     # Check config data when empty
-    data = nn.get_config_data()
+    data = nn._get_nn_config_data()
     assert data == (
         b"\x10\x00\x00\x00"  # Length prefix
         b"\xFF\xFF\x00\x00"  # key_seq_mask (bottom 16 bits)
@@ -64,7 +64,7 @@ def test_get_config_data(nn):
     # structures will be given different sizes (tn1 will be larger).
     tn2.add_sink(tn1)
     
-    data = nn.get_config_data()
+    data = nn._get_nn_config_data()
     assert data == (
         struct.pack("<I", nn.get_config_data_size() - 4) +  # Length prefix
         b"\xFF\xFF\x00\x00"    # key_seq_mask (bottom 16 bits)
@@ -74,11 +74,7 @@ def test_get_config_data(nn):
         # traffic_nodes array
         struct.pack("<I", 16 + 8) +  # offset of tn1 struct
         struct.pack("<I", 16 + 8
-                      + tn1.get_config_data_size()) +  # offset of tn2 struct
-        # tn1 struct
-        tn1.get_config_data() +
-        # tn2 struct
-        tn2.get_config_data()
+                      + tn1.get_config_data_size())  # offset of tn2 struct
     )
-    assert nn.get_config_data_size() == len(data) == (
+    assert nn.get_config_data_size() == (
         20 + 8 + tn1.get_config_data_size() + tn2.get_config_data_size())

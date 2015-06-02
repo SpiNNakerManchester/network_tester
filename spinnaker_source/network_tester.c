@@ -190,7 +190,7 @@ void on_mc_packet(uint key, uint payload)
 			if (source->key == key) {
 				// Record packet arrivals.
 				source->num_received++;
-				if (seq_num != source->last_seq_num + 1)
+				if (seq_num < source->last_seq_num + 1)
 					source->num_out_of_order;
 				source->last_seq_num = seq_num;
 				
@@ -209,6 +209,7 @@ void c_main(void)
 	uint core_id = sark_core_id();
 	network_node = copy_config_from_sdram(core_id);
 	
+	// TODO: Set a seed
 	
 	// Select the timer tick interval. Default is every 10ms.
 	tick_interval = 10000;

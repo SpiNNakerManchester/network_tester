@@ -133,24 +133,15 @@ class Experiment(object):
         
         return application_map, routing_tables
     
-    
-    def _allocate_sdram(self):
-        """Allocate SDRAM blocks for network node configuration.
-        
-        Intialises the nn.sdram MemoryIO objects for each network node.
-        """
+    def _load_sdram(self):
+        """Allocate SDRAM blocks for network node configuration and load the
+        associated data."""
         for nn in self.nns:
             x, y, core = nn.location
             nn.sdram = self.mc.sdram_alloc_as_filelike(
                 nn.get_config_data_size(), tag=core, x=x, y=y)
-    
-    
-    def _load_sdram(self):
-        """Load SDRAM blocks with network node configuration data."""
-        for nn in self.nns:
-            nn.sdram.seek(0)
-            written = nn.sdram.write(nn.get_config_data())
-            assert written == nn.get_config_data_size()
+            
+            nn.write_config_data()
     
     def run(self, duration):
         """Load the experiment onto the machine and run it.
@@ -165,7 +156,6 @@ class Experiment(object):
         machine = self.mc.get_machine()
         application_map, routing_tables = self._place_and_route(machine)
         self.mc.load_routing_tables(routing_tables)
-        self._allocate_sdram()
         self._load_sdram()
         self.mc.load_application(application_map)
         

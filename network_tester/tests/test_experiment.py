@@ -1,5 +1,7 @@
 import pytest
 
+from six import iteritems
+
 from mock import Mock
 
 from rig.machine import Machine, Cores
@@ -56,10 +58,9 @@ def test__place_and_route_empty(e, machine):
 
 
 def test__place_and_route(e, machine):
-    # Generate n_cores worth of network nodes where each node has a ring network
+    # Generate n_nodes worth of network nodes where each node has a ring network
     # of relays and a single broadcast Bernoulli source
-    n_nodes = (machine.chip_resources[Cores] - 1) * (machine.width *
-                                                     machine.height)
+    n_nodes = (machine.width * machine.height)
     
     nns = []
     broadcast_tns = []
@@ -86,16 +87,12 @@ def test__place_and_route(e, machine):
     # Make sure every network node has a unique location and every traffic node
     # has a unique net.
     
-    # Every core should be used (less monitor cores)
+    # The right number of cores should be used, all with the same binary
     binary = pkg_resources.resource_filename("network_tester",
                                              "binaries/network_tester.aplx")
-    assert application_map == {binary: {  # pragma: no branch
-        (x, y): set(range(1, machine.chip_resources[Cores]))
-        for x in range(machine.width)
-        for y in range(machine.height)
-    }}
-    
-    # Every core should have some routes going to it
-    assert set(routing_tables) == set((x, y)
-                                      for x in range(machine.width)
-                                      for y in range(machine.height))
+    assert set(application_map) == set([binary])
+    num_cores = 0
+    for xy, cores in iteritems(application_map[binary]):
+        num_cores += len(cores)
+        assert xy in machine
+    assert num_cores == n_nodes

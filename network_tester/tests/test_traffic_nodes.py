@@ -45,7 +45,7 @@ def test_add_sink(nn):
     assert set(tn3.sinks) == set([tn1])
 
 
-def test_TrafficNode_get_config_data(e, nn):
+def test_TrafficNode__get_config_data(e, nn):
     # Make sure config data is packed correctly
     
     # With and without payloads
@@ -58,7 +58,7 @@ def test_TrafficNode_get_config_data(e, nn):
     tn2.add_sink(tn3)
     tn1.add_sink(tn3)
     
-    data = tn1.get_config_data(0xAB, b"")
+    data = tn1._get_config_data(0xAB, b"")
     assert data == (
         b"\xAB\x00\x00\x00"  # type (0xAB)
         b"\x00\x00\x00\x00"  # key (ID = 0)
@@ -70,7 +70,7 @@ def test_TrafficNode_get_config_data(e, nn):
     )
     assert tn1.get_config_data_size() == len(data) == 36
     
-    data = tn2.get_config_data(0xAB, b"hi")
+    data = tn2._get_config_data(0xAB, b"hi")
     assert data == (
         b"\xAB\x00\x00\x00"  # type (0xAB)
         b"\x00\x00\x01\x00"  # key (ID = 1)
@@ -82,7 +82,7 @@ def test_TrafficNode_get_config_data(e, nn):
     )
     assert tn2.get_config_data_size() == len(data) == 36
     
-    data = tn3.get_config_data(0xAB, b"")
+    data = tn3._get_config_data(0xAB, b"")
     assert data == (
         b"\xAB\x00\x00\x00"  # type (0xAB)
         b"\x00\x00\x02\x00"  # key (ID = 2)
@@ -105,7 +105,7 @@ def test_TrafficNode_get_config_data(e, nn):
     assert tn3.get_config_data_size() == len(data) == 36 + 16 + 16
 
 
-def test_BernoulliNode_get_config_data(e, nn):
+def test_BernoulliNode__get_config_data(e, nn):
     # Make sure the BernoulliNode struct is packet correctly
     tn = nn.new_traffic_node(BernoulliNode(period=0.001,
                                            probability=0.5,
@@ -114,7 +114,7 @@ def test_BernoulliNode_get_config_data(e, nn):
                                            packet_interval=0.000001,
                                            payload=True))
     
-    data = tn.get_config_data()
+    data = tn._get_config_data()
     assert data == (
         b"\x00\x00\x00\x00"                  # type (bernoulli == 0)
         b"\x00\x00\x00\x00"                  # key (ID = 0)
@@ -128,11 +128,11 @@ def test_BernoulliNode_get_config_data(e, nn):
     assert tn.get_config_data_size() == len(data) == 36
 
 
-def test_RelayNode_get_config_data(e, nn):
+def test_RelayNode__get_config_data(e, nn):
     # Make sure the RelayNode struct is packet correctly
     tn = nn.new_traffic_node(RelayNode(payload=True))
     
-    data = tn.get_config_data()
+    data = tn._get_config_data()
     assert data == (
         b"\x01\x00\x00\x00"  # type (relay == 1)
         b"\x00\x00\x00\x00"  # key (ID = 0)

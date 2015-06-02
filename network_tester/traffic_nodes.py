@@ -13,7 +13,26 @@ class TrafficNodeType(IntEnum):
 
 
 class TrafficNode(object):
-    """A base class for all traffic node types."""
+    """A base class for all traffic node types.
+    
+    The following attributes are set after read_result_data has been called on
+    this (and all sink) traffic nodes.
+    
+    Attributes
+    ----------
+    num_sent : int
+        The number of packets actually sent by this node during the experiment.
+    num_arrived : int
+        The total number of packets which arrived at all sinks.
+    num_arrived_per_sink : {sink: int, ...}
+        A dictionary which maps from each sink to the number of packets which
+        arrived at that sink from this traffic node.
+    num_out_of_order : int
+        The total number of packets which arrived out of order at all sinks.
+    num_out_of_order_per_sink : {sink: int, ...}
+        A dictionary which maps from each sink to the number of packets which
+        arrived out of order at that sink from this traffic node.
+    """
 
     traffic_node_spec_t = Struct("<"     # (Little-endian)
                                  "I"     # traffic_node_type_t type;
@@ -51,16 +70,26 @@ class TrafficNode(object):
         
         # A rig BitField giving the keys for packets sent via this node
         self.key = None
-    
-    
+        
+        # A file-like object which presents an interface to the SpiNNaker SDRAM
+        # associated with the memory which stores the struct data for this
+        # traffic node.
+        self.sdram = None
+        
+        # Public result attributes (see class docstring)
+        num_sent = None
+        num_arrived = None
+        num_arrived_per_sink = {}
+        num_out_of_order = None
+        num_out_of_order_per_sink = {}
+        
     def add_sink(self, tn):
         """Send traffic produced by this traffic node to the specified traffic
         node."""
         self.sinks.append(tn)
         tn.sources.append(self)
     
-    
-    def get_config_data(self, type, data_field):
+    def _get_config_data(self, type, data_field):
         """Generate the configuration data to be loaded for this traffic node.
         
         Parameters
@@ -100,58 +129,28 @@ class TrafficNode(object):
         
         return data
     
+    def write_config_data(self):
+        """Write the traffic node's config data to the machine's SDRAM."""
+        self.sdram.seek(0)
+        self.sdram.write(self._get_config_data())
+    
     def get_config_data_size(self):
         """Get the number of bytes required to store this traffic node."""
         return (TrafficNode.traffic_node_spec_t.size +
                 TrafficNode.traffic_node_spec_t_union_size +
                 (TrafficNode.traffic_node_source_t.size * len(self.sources)))
     
-    @property
-    def num_sent(self):
-        """The count of the number of packets sent by this traffic node."""
-        # TODO
-        raise NotImplementedError()
+    def _unpack_results(self, data):
+        """Given a copy of the data read back from the machine after an
+        experiment, extract result data into this class' attributes."""
+        traffic_node_config_data = data[:self.get_config_data_size()]
+        
+        TrafficNode.traffic_node_source_t.unpack(traffic_node_config_data)
     
     
-    @property
-    def num_received(self):
-        """The count of the number of packets sent by this traffic node which
-        arrived at their destination."""
-        # TODO
-        raise NotImplementedError()
-    
-    
-    @property
-    def send_times(self):
-        """A list of packet send times (in seconds)."""
-        # TODO
-        raise NotImplementedError()
-    
-    
-    @property
-    def receive_times(self):
-        """A dictionary giving lists of packet arrival times (in seconds) for
-        each destination traffic node."""
-        # TODO
-        raise NotImplementedError()
-    
-    
-    @property
-    def latencies(self):
-        """A dictionary from destination traffic node and a list of packet
-        latencies (in seconds) between a packet being sent and it arriving at
-        the specified destination (based on network synchronised clocks)."""
-        # TODO
-        raise NotImplementedError()
-    
-    
-    @property
-    def roundtrips(self):
-        """A list of latencies (in seconds) between a packet being sent and a
-        packet arriving at this node with the same ID (e.g. following it being
-        bounced by a RelayNode)."""
-        # TODO
-        raise NotImplementedError()
+    def read_result_data(self):
+        self.sdram.seek(0)
+        self._unpack_results(self.sdram.read(self.get_config_data_size()))
 
 
 class BernoulliNode(TrafficNode):
@@ -184,7 +183,7 @@ class BernoulliNode(TrafficNode):
         self.probability = probability
     
     
-    def get_config_data(self):
+    def _get_config_data(self):
         """Generate the configuration data to be loaded for this traffic node.
         
         Returns
@@ -200,7 +199,7 @@ class BernoulliNode(TrafficNode):
         data = BernoulliNode.data_struct.pack(self.probability,
                                               to_us(self.period))
         
-        return super(BernoulliNode, self).get_config_data(
+        return super(BernoulliNode, self)._get_config_data(
             TrafficNodeType.bernoulli, data)
 
 
@@ -218,7 +217,7 @@ class RelayNode(TrafficNode):
         super(RelayNode, self).__init__(payload)
     
     
-    def get_config_data(self):
+    def _get_config_data(self):
         """Generate the configuration data to be loaded for this traffic node.
         
         Returns
@@ -227,5 +226,5 @@ class RelayNode(TrafficNode):
             Two sets of bytes
             The config data for the current traffic node.
         """
-        return super(RelayNode, self).get_config_data(
+        return super(RelayNode, self)._get_config_data(
             TrafficNodeType.relay, b"")
