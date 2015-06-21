@@ -4,7 +4,7 @@ APP = network_tester
 APP_OUTPUT_DIR = ../network_tester/binaries/
 BUILD_DIR = build/
 
-OBJECTS = network_tester.o bernoulli.o
+OBJECTS = network_tester.o
 #LIBRARIES = -lspin1_api
 
 include $(SPINN_DIRS)/Makefile.common
