@@ -14,17 +14,17 @@ mc = MachineController(sys.argv[1])
 
 
 with mc.application(0x42):
-	num_samples = 1000
+	num_samples = 1
 	num_vals = 2
 	commands = [
-		0x04, 1000000,  # NT_CMD_TIMESTEP 1ms
+		0x04, 1250,  # NT_CMD_TIMESTEP 1.25us
 		0x10, (1<<16) | (1<<17),  # NT_CMD_RECORD MC sent,received
-		0x11, 100,  # NT_CMD_RECORD_INTERVAL: 100ms
+		0x11, 0,  # NT_CMD_RECORD_INTERVAL: 0
 		0x20, 0xFFFFFFFF,  # NT_CMD_PROBABILITY 1
 		#0x21, 100, # NT_CMD_BURST_PERIOD 100ms
 		#0x22, 50, # NT_CMD_BURST_DUTY 50ms
 		#0x31, # NT_CMD_NO_CONSUME
-		0x05, 1000,  # NT_CMD_RUN 1s
+		0x05, 1000,  # NT_CMD_RUN 10ms
 		#0x30, # NT_CMD_CONSUME
 		0x01, 1, # NT_CMD_SLEEP 1us
 		0x02,  # Sync
