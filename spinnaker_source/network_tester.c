@@ -10,6 +10,7 @@
 
 #include "network_tester.h"
 
+
 #define MS_TO_TICKS(ms) ((ms) * ((uint32_t)sv->cpu_clk) * 1000u)
 #define US_TO_TICKS(us) ((us) * ((uint32_t)sv->cpu_clk))
 #define NS_TO_TICKS(ns) (((ns) * ((uint32_t)sv->cpu_clk)) / 1000u)
@@ -25,6 +26,10 @@ static bool error_occurred = false;
 // Bit 17 enables logging number of blocked packets due to back pressure
 // Bit 24 enables logging number of received packets
 static uint32_t to_record;
+
+#define RECORD_SENT_BIT (1u << 16)
+#define RECORD_BLOCKED_BIT (1u << 17)
+#define RECORD_RECEIVED_BIT (1u << 24)
 
 // The maximum number of values which can be recorded simultaneously (used to
 // set the size of the buffer where results are stored)
@@ -42,82 +47,41 @@ static uint32_t *sdram_block;
 // SDRAM location where the next results should be stored
 static uint32_t *sdram_next_results;
 
-// Probability of a packet being injection each timestep. Probability is scaled
-// by (1<<32) with 0xFFFFFFFF being special-cased as "1".
-static uint32_t probability;
-
 // Bursting traffic generation. See diagram in command format spec.
 static uint32_t burst_period_steps;
 static uint32_t burst_duty_steps;
 static uint32_t burst_phase_steps;
 
-// The top 24 bits of this value are used as the key of the MC packets which
-// will be generated.
-static uint32_t key;
-
-// Should generated packets include payloads?
-static bool payload;
-
-// Count of packets which have arrived at this core
-static uint32_t arrived_count = 0;
-
-// Count of packets which have been sent by this core
-static uint32_t sent_count = 0;
-
-// Count of packets which were attempted to be sent but which were blocked by
-// back-pressure from the network.
-static uint32_t blocked_count = 0;
-
-// This array contains pointers to recordable values for each bit in to_record
-// (or NULL for bits without a valid counter).
-static uint32_t *counters[32] = {
-	// Bits 0-15: router counters
-	((uint32_t *)RTR_BASE) + RTR_DGC0,
-	((uint32_t *)RTR_BASE) + RTR_DGC1,
-	((uint32_t *)RTR_BASE) + RTR_DGC2,
-	((uint32_t *)RTR_BASE) + RTR_DGC3,
-	((uint32_t *)RTR_BASE) + RTR_DGC4,
-	((uint32_t *)RTR_BASE) + RTR_DGC5,
-	((uint32_t *)RTR_BASE) + RTR_DGC6,
-	((uint32_t *)RTR_BASE) + RTR_DGC7,
-	((uint32_t *)RTR_BASE) + RTR_DGC8,
-	((uint32_t *)RTR_BASE) + RTR_DGC9,
-	((uint32_t *)RTR_BASE) + RTR_DGC10,
-	((uint32_t *)RTR_BASE) + RTR_DGC11,
-	((uint32_t *)RTR_BASE) + RTR_DGC12,
-	((uint32_t *)RTR_BASE) + RTR_DGC13,
-	((uint32_t *)RTR_BASE) + RTR_DGC14,
-	((uint32_t *)RTR_BASE) + RTR_DGC15,
-	// Bit 16: sent packets
-	&sent_count,
-	// Bit 17: blocked packets
-	&blocked_count,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	// Bit 24: blocked packets
-	&arrived_count,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-};
+// Details of the set of sources and sinks.
+static size_t num_sources;
+static size_t num_sinks;
+static source_t *sources;
+static sink_t *sinks;
 
 // This buffer is used to store the last raw counter values recorded. These are
 // used to calculate the change in counter values between this recording and
 // the next recording. The results are packed consecutively from index zero
-// onwards.
-static uint32_t last_recorded[MAX_RECORDABLE_VALUES];
+// onwards. This buffer is guaranteed to be at least large enough to store all
+// router registers and all source and sink counters. It is resized by the
+// set_num_sources and set_num_sinks calls.
+static uint32_t *last_recorded;
 
 // This buffer holds the results currently being copied into SDRAM by DMA.
-static uint32_t recorded_value_buffer[MAX_RECORDABLE_VALUES];
+static uint32_t *recorded_value_buffer;
 
+// The number of recording counters which exist for each router, source and
+// sink.
+#define NUM_ROUTER_COUNTERS 16
+#define NUM_SOURCE_COUNTERS 3
+#define NUM_SINK_COUNTERS 1
+
+// Given a number of sinks and a number of sources, gives the maximum number of
+// result counters which may exist.
+#define MAX_NUM_RESULTS(num_sources, num_sinks) ( \
+	NUM_ROUTER_COUNTERS + \
+	(NUM_SOURCE_COUNTERS * (num_sources)) + \
+	(NUM_SINK_COUNTERS * (num_sinks)) \
+)
 
 
 // XXX: Will be included as part of next version of SCAMP/SARK
@@ -133,11 +97,123 @@ void *sark_tag_ptr (uint tag, uint app_id)
 
 
 /**
+ * Change the number of sources.
+ */
+void set_num_sources(size_t new_num_sources) {
+	// Allocate a new array of sources
+	source_t *new_sources = sark_alloc(new_num_sources, sizeof(source_t));
+	if (!new_sources) {
+		ERROR("Could not allocate space for %d sources.\n", new_num_sources);
+		error_occurred = true;
+		return;
+	}
+	
+	// Allocate new result arrays
+	uint32_t *new_last_recorded = sark_alloc(
+		MAX_NUM_RESULTS(new_num_sources, num_sinks), sizeof(uint32_t));
+	if (!new_last_recorded) {
+		ERROR("Could not allocate space for %d sources.\n", new_num_sources);
+		error_occurred = true;
+		sark_free(new_sources);
+		return;
+	}
+	uint32_t *new_recorded_value_buffer = sark_alloc(
+		MAX_NUM_RESULTS(new_num_sources, num_sinks), sizeof(uint32_t));
+	if (!new_recorded_value_buffer) {
+		ERROR("Could not allocate space for %d sources.\n", new_num_sources);
+		error_occurred = true;
+		sark_free(new_sources);
+		sark_free(new_last_recorded);
+		return;
+	}
+	
+	// Set default values
+	for (int i = 0; i < new_num_sources; i++) {
+		new_sources[i].probability = 0x00000000; // 0%
+		new_sources[i].payload = false;
+		new_sources[i].sent_count = 0;
+		new_sources[i].blocked_count = 0;
+	}
+	
+	// Copy-across all previous sources which remain
+	spin1_memcpy(new_sources, sources,
+	             MIN(new_num_sources, num_sources) * sizeof(source_t));
+	
+	if (num_sources > 0)
+		sark_free(sources);
+	sources = new_sources;
+	num_sources = new_num_sources;
+	
+	sark_free(last_recorded);
+	last_recorded = new_last_recorded;
+	sark_free(recorded_value_buffer);
+	recorded_value_buffer = new_recorded_value_buffer;
+}
+
+
+/**
+ * Change the number of sinks.
+ */
+void set_num_sinks(size_t new_num_sinks) {
+	// Allocate a new array of sinks
+	sink_t *new_sinks = sark_alloc(new_num_sinks, sizeof(sink_t));
+	if (!new_sinks) {
+		ERROR("Could not allocate space for %d sinks.\n", new_num_sinks);
+		error_occurred = true;
+		return;
+	}
+	
+	// Allocate new result arrays
+	uint32_t *new_last_recorded = sark_alloc(
+		MAX_NUM_RESULTS(num_sources, new_num_sinks), sizeof(uint32_t));
+	if (!new_last_recorded) {
+		ERROR("Could not allocate space for %d sinks.\n", new_num_sinks);
+		error_occurred = true;
+		sark_free(new_sinks);
+		return;
+	}
+	uint32_t *new_recorded_value_buffer = sark_alloc(
+		MAX_NUM_RESULTS(num_sources, new_num_sinks), sizeof(uint32_t));
+	if (!new_recorded_value_buffer) {
+		ERROR("Could not allocate space for %d sinks.\n", new_num_sinks);
+		error_occurred = true;
+		sark_free(new_sinks);
+		sark_free(new_last_recorded);
+		return;
+	}
+	
+	// Set default values
+	for (int i = 0; i < new_num_sinks; i++) {
+		new_sinks[i].arrived_count = 0;
+	}
+	
+	// Copy-across all previous sinks which remain
+	spin1_memcpy(new_sinks, sinks,
+	             MIN(new_num_sinks, num_sinks) * sizeof(sink_t));
+	
+	if (num_sinks > 0)
+		sark_free(sinks);
+	sinks = new_sinks;
+	num_sinks = new_num_sinks;
+	
+	sark_free(last_recorded);
+	last_recorded = new_last_recorded;
+	sark_free(recorded_value_buffer);
+	recorded_value_buffer = new_recorded_value_buffer;
+}
+
+
+/**
  * Callback on MC packet arrival. Simply counts the packet.
  */
-void on_mc_packet(uint arg0, uint arg1)
+void on_mc_packet(uint key, uint payload)
 {
-	arrived_count++;
+	uint32_t count = key & 0xFF;
+	key &= ~0xFF;
+	
+	for (int i = 0; i < num_sinks; i++)
+		if (sinks[i].key == key)
+			sinks[i].arrived_count++;
 }
 
 
@@ -145,38 +221,54 @@ void on_mc_packet(uint arg0, uint arg1)
  * Record a single snapshot of the network's activity.
  *
  * If first is 0, no data will be stored in SDRAM but the current counter
- * values will be sampled.
+ * values will be sampled. Note that this function must be called with first ==
+ * true at the start of each run, otherwise the recorded values will be
+ * invalid.
  */
 void record(bool first)
 {
 	int num_results = 0;
 	
+	#define APPEND_RESULT(value) do { \
+			/* Record the change in counter value */ \
+			recorded_value_buffer[num_results] = (value) - last_recorded[num_results]; \
+			/* Remember the current value to allow changes to be detected */ \
+			last_recorded[num_results] = (value); \
+			num_results++; \
+	} while (0)
+	
 	// Record router counters.
-	for (int counter = 0; counter < 32; counter++) {
-		if (to_record & (1u << counter) && counters[counter] != NULL) {
-			uint32_t value = *(counters[counter]);
-			// Record the change in counter value
-			recorded_value_buffer[num_results] = value - last_recorded[num_results];
-			
-			// Remember the current value to allow changes to be detected
-			last_recorded[num_results] = value;
-			
-			num_results++;
+	for (int counter = 0; counter < NUM_ROUTER_COUNTERS; counter++) {
+		if (to_record & (1u << counter)) {
+			uint32_t value = (((uint32_t *)RTR_BASE) + RTR_DGC0)[counter];
+			APPEND_RESULT(value);
 		}
 	}
+	
+	// Record source/sink counters
+	if (to_record & RECORD_SENT_BIT)
+		for (int source = 0; source < num_sources; source++)
+			APPEND_RESULT(sources[source].sent_count);
+	if (to_record & RECORD_BLOCKED_BIT)
+		for (int source = 0; source < num_sources; source++)
+			APPEND_RESULT(sources[source].blocked_count);
+	if (to_record & RECORD_RECEIVED_BIT)
+		for (int sink = 0; sink < num_sinks; sink++)
+			APPEND_RESULT(sinks[sink].arrived_count);
 	
 	if (!first && num_results > 0) {
 		// DMA the results into SDRAM
 		if (!spin1_dma_transfer(DMA_WRITE, sdram_next_results, recorded_value_buffer, DMA_WRITE,
 		                        num_results * sizeof(uint32_t))) {
-			io_printf(IO_BUF, "ERROR: DMA transfer of %d bytes failed.\n",
-			          num_results * sizeof(uint32_t));
+			ERROR("DMA transfer of %d bytes failed.\n", num_results * sizeof(uint32_t));
 			error_occurred = true;
 		}
 		
 		// Advance the SDRAM pointer to the next free space
 		sdram_next_results += num_results;
 	}
+	
+	#undef APPEND_RESULT
 }
 
 
@@ -222,17 +314,20 @@ bool run(uint32_t time_left_steps)
 			burst = true;
 		}
 		
-		// Possibly generate a packet
+		// Generate packets for each packet source
 		if (burst) {
-			bool generate = (probability == 0xFFFFFFFFu)
-			              || (sark_rand() < probability);
-			
-			if (generate) {
-				bool sent = spin1_send_mc_packet(key, 0xDEADBEEF, payload);
-				if (sent)
-					sent_count++;
-				else
-					blocked_count++;
+			for (int i = 0; i < num_sources; i++) {
+				bool generate = (sources[i].probability == 0xFFFFFFFFu)
+				              || (sark_rand() < sources[i].probability);
+				
+				if (generate) {
+					bool sent = spin1_send_mc_packet(sources[i].key, 0xDEADBEEF,
+					                                 sources[i].payload);
+					if (sent)
+						sources[i].sent_count++;
+					else
+						sources[i].blocked_count++;
+				}
 			}
 		}
 		
@@ -262,108 +357,139 @@ void interpreter_main(uint commands_ptr, uint arg1)
 {
 	uint32_t *commands = (uint32_t *)commands_ptr;
 	
-	io_printf(IO_BUF, "INFO: Starting main loop with first command at 0x%08x\n",
+	INFO("Starting main loop with first command at 0x%08x\n",
 	          commands);
 	
 	while (1) {
-		switch (*commands) {
+		// Extract the command identifier
+		int command = ((*commands) >> 0) & 0xFF;
+		
+		// Extract the sink/source number (if present)
+		int num = ((*commands) >> 8) & 0xFF;
+		
+		DEBUG("Executing command 0x%02x at 0x%08x...\n", command, commands);
+		
+		commands++;
+		
+		switch (command) {
 			default:
 				error_occurred = true;
-				io_printf(IO_BUF, "ERROR: Unrecognised command '0x%02x' at 0x%08x\n",
-				          *commands, commands);
+				ERROR("Unrecognised command '0x%02x' at 0x%08x\n", *commands, commands);
 				// Fall through to NT_CMD_EXIT
 			
 			case NT_CMD_EXIT:
 				sdram_block[0] = error_occurred;
-				io_printf(IO_BUF, "INFO: network_tester exiting with status %s\n",
-				          error_occurred ? "ERROR" : "OK");
+				INFO("network_tester exiting with status %s\n",
+				     error_occurred ? "ERROR" : "OK");
 				spin1_exit((int)error_occurred);
 				return;
 			
 			case NT_CMD_SLEEP:
-				commands++;
 				spin1_delay_us(*(commands++));
 				break;
 			
 			case NT_CMD_BARRIER:
-				commands++;
 				event_wait();
 				break;
 			
 			case NT_CMD_SEED:
-				commands++;
 				sark_srand(*(commands++));
 				break;
 			
 			case NT_CMD_TIMESTEP:
-				commands++;
 				timestep_ticks = (int32_t)NS_TO_TICKS(*(commands++));
 				break;
 			
 			case NT_CMD_RUN:
-				commands++;
 				if (run(*(commands++))) {
-					io_printf(IO_BUF, "ERROR: Timing deadline(s) missed during run\n");
+					ERROR("Timing deadline(s) missed during run\n");
 					error_occurred = true;
 				}
 				break;
 			
-			case NT_CMD_RECORD:
+			case NT_CMD_NUM:
+				set_num_sources((*commands) & 0xFF);
+				set_num_sinks(((*commands) >> 8) & 0xFF);
 				commands++;
+				break;
+			
+			case NT_CMD_RECORD:
 				to_record = *(commands++);
 				break;
 			
 			case NT_CMD_RECORD_INTERVAL:
-				commands++;
 				record_interval_steps = *(commands++);
 				break;
 			
 			case NT_CMD_PROBABILITY:
-				commands++;
-				probability = *(commands++);
+				if (num < num_sources) {
+					sources[num].probability = *(commands++);
+				} else {
+					commands++;
+					ERROR("Source %d does not exist.\n", num);
+					error_occurred = true;
+				}
 				break;
 			
 			case NT_CMD_BURST_PERIOD:
-				commands++;
 				burst_period_steps = *(commands++);
 				break;
 			
 			case NT_CMD_BURST_DUTY:
-				commands++;
 				burst_duty_steps = *(commands++);
 				break;
 			
 			case NT_CMD_BURST_PHASE:
-				commands++;
 				burst_phase_steps = *(commands++);
 				break;
 			
-			case NT_CMD_KEY:
-				commands++;
-				key = *(commands++);
+			case NT_CMD_SOURCE_KEY:
+				if (num < num_sources) {
+					sources[num].key = *(commands++);
+				} else {
+					commands++;
+					ERROR("Source %d does not exist.\n", num);
+					error_occurred = true;
+				}
 				break;
 			
 			case NT_CMD_PAYLOAD:
-				commands++;
-				payload = true;
+				if (num < num_sources) {
+					sources[num].payload = true;
+				} else {
+					ERROR("Source %d does not exist.\n", num);
+					error_occurred = true;
+				}
 				break;
 			
 			case NT_CMD_NO_PAYLOAD:
-				commands++;
-				payload = false;
+				if (num < num_sources) {
+					sources[num].payload = false;
+				} else {
+					ERROR("Source %d does not exist.\n", num);
+					error_occurred = true;
+				}
 				break;
 			
 			case NT_CMD_CONSUME:
-				commands++;
 				// Enables the interrupt on packet arrival
 				vic[VIC_ENABLE] = 1 << CC_RDY_INT;
 				break;
 			
 			case NT_CMD_NO_CONSUME:
-				commands++;
 				// Disables the interrupt on packet arrival causing the packets to
 				// back-up in the network.
 				vic[VIC_DISABLE] = 1 << CC_RDY_INT;
+				break;
+			
+			case NT_CMD_SINK_KEY:
+				if (num < num_sinks) {
+					sinks[num].key = *(commands++);
+				} else {
+					commands++;
+					ERROR("Sink %d does not exist.\n", num);
+					error_occurred = true;
+				}
 				break;
 		}
 	}
@@ -381,29 +507,46 @@ void c_main(void)
 	to_record = 0x00000000; // Nothing
 	record_interval_steps = 0;
 	timestep_ticks = US_TO_TICKS(100);
-	probability = 0xFFFFFFFF; // 100%
 	burst_period_steps = 0; // Not bursty
 	burst_duty_steps = 0; // No ticks on
 	burst_phase_steps = 0; // Default: all aligned
-	key = (x << 24) | (y << 16) | (p << 8); // Default: XYP
-	payload = false; // Default: no payloads
+	
+	// Initially have no sources/sinks
+	num_sources = 0;
+	num_sinks = 0;
 	
 	// Accept MC packets
 	spin1_callback_on(MC_PACKET_RECEIVED, on_mc_packet, -1);
 	spin1_callback_on(MCPL_PACKET_RECEIVED, on_mc_packet, -1);
+	
+	// Allocate space for storing results (this may be reallocated later)
+	last_recorded = sark_alloc(
+		MAX_NUM_RESULTS(num_sources, num_sinks), sizeof(uint32_t));
+	if (!last_recorded) {
+		ERROR("Could not allocate space last_recorded.\n");
+		return;
+	}
+	recorded_value_buffer = sark_alloc(
+		MAX_NUM_RESULTS(num_sources, num_sinks), sizeof(uint32_t));
+	if (!recorded_value_buffer) {
+		ERROR("Could not allocate space for recorded_value_buffer.\n");
+		return;
+	}
 	
 	// Load the commands loaded into SDRAM by the host. The commands are prefixed
 	// with a 32-bit integer giving the number of bytes worth of commands.
 	sdram_block = (uint32_t *)sark_tag_ptr(p, 0);
 	sdram_next_results = sdram_block + 1;
 	uint32_t commands_length = sdram_block[0];
-	uint32_t *commands = spin1_malloc(commands_length);
+	uint32_t *commands = sark_alloc(commands_length, 1);
 	if (commands == NULL) {
-		io_printf(IO_BUF, "ERROR: Failed to alloc %d bytes.\n", commands_length);
+		ERROR("Failed to alloc %d bytes.\n", commands_length);
 		return;
 	}
+	DEBUG("SDRAM (apparently) contains %d bytes of commands at 0x%08x...\n",
+	      commands_length, sdram_block + 1);
 	spin1_memcpy(commands, sdram_block + 1, commands_length);
-	io_printf(IO_BUF, "INFO: Copied %d bytes of commands from SDRAM...\n", commands_length);
+	INFO("Copied %d bytes of commands from SDRAM...\n", commands_length);
 	
 	// Start the command interpreter as soon as the API starts
 	spin1_schedule_callback(interpreter_main, (uint)commands, 0, 1);
@@ -418,7 +561,7 @@ void c_main(void)
 	                  | 0 << 0  // O: Wrapping mode, not one-shot
 	                  );
 	
-	io_printf(IO_BUF, "INFO: spin1_start\n");
+	INFO("spin1_start\n");
 	
 	spin1_start(SYNC_NOWAIT);
 }

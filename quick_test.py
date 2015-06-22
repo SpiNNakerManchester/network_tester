@@ -15,19 +15,25 @@ mc = MachineController(sys.argv[1])
 
 with mc.application(0x42):
 	num_samples = 1
-	num_vals = 2
+	num_vals = 4
 	commands = [
-		0x04, 1250,  # NT_CMD_TIMESTEP 1.25us
-		0x10, (1<<16) | (1<<17),  # NT_CMD_RECORD MC sent,received
+		0x04, 2500,  # NT_CMD_TIMESTEP (1.25us is the shortest for 1 in/out)
+		0x10, (1<<16) | (1<<24),  # NT_CMD_RECORD MC sent,received
 		0x11, 0,  # NT_CMD_RECORD_INTERVAL: 0
-		0x20, 0xFFFFFFFF,  # NT_CMD_PROBABILITY 1
+		0x06, 0x0202, # NT_CMD_NUM: One source, one sink
+		0x0020, 0xFFFFFFFF,  # NT_CMD_PROBABILITY[0] 1
+		0x0024, 0xBEEF0000,  # NT_CMD_SOURCE_KEY[0]
+		0x0032, 0xBEEF0000,  # NT_CMD_SINK_KEY[0]
+		0x0120, 0xFFFFFFFF,  # NT_CMD_PROBABILITY[1] 1
+		0x0124, 0xDEAD0000,  # NT_CMD_SOURCE_KEY[1]
+		0x0132, 0xDEAD0000,  # NT_CMD_SINK_KEY[1]
 		#0x21, 100, # NT_CMD_BURST_PERIOD 100ms
 		#0x22, 50, # NT_CMD_BURST_DUTY 50ms
 		#0x31, # NT_CMD_NO_CONSUME
 		0x05, 1000,  # NT_CMD_RUN 10ms
 		#0x30, # NT_CMD_CONSUME
-		0x01, 1, # NT_CMD_SLEEP 1us
-		0x02,  # Sync
+		#0x01, 1, # NT_CMD_SLEEP 1us
+		0x02,  # NT_CMD_BARRIER
 		0x00, # NT_CMD_EXIT
 	]
 	

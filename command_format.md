@@ -9,8 +9,9 @@ followed by a certain number of values.
 
 All values are little endian and all instructions must be 32-bit word aligned.
 
-In this version of the specification, all commands have a number in the range
-0-255.
+All commands have a number in the range 0-255 which is specified in the 8 least
+significant bits of the first word of each command. All other bits of this word
+should be ignored unless otherwise specified.
 
 Upon reading an unrecognised instruction number, the interpreter should halt
 and report an error.
@@ -58,7 +59,7 @@ Seed the random number generator with the specified seed.
 ### 0x04: `NT_CMD_TIMESTEP`
 
     +------------------+------------------+
-    | 0x20             | timestep_ns      |
+    | 0x04             | timestep_ns      |
     +------------------+------------------+
           1 word             1 word
 
@@ -68,11 +69,23 @@ be in terms of this unit.
 ### 0x05: `NT_CMD_RUN`
 
     +------------------+------------------+
-    | 0x04             | steps            |
+    | 0x05             | steps            |
     +------------------+------------------+
           1 word             1 word
 
 Run the traffic generator for the specified number of timesteps.
+
+### 0x06: `NT_CMD_NUM`
+
+    +------------------+-------------------+
+    | 0x06             | num_src_snk       |
+    +------------------+-------------------+
+          1 word             1 word
+
+Specify the number of traffic sources and sinks this traffic generator should
+impelement. `num_src_snk` has the number of sources in bits 7:0 and the number
+of sinks in bits 15:8.
+
 
 Result recording commands
 -------------------------
@@ -115,13 +128,14 @@ Packet generation commands
 ### 0x20: `NT_CMD_PROBABILITY`
 
     +------------------+------------------+
-    | 0x21             | probability      |
+    | 0x21 | src<<8    | probability      |
     +------------------+------------------+
           1 word             1 word
 
-The probability of a packet being generated each timestep. The probability of
-transmission is calculated as `probability`/(1<<32).
+The probability of a packet being generated each timestep for each traffic
+source where the source number is specified in bits 15:8 of the command.
 
+The probability of transmission is calculated as `probability`/(1<<32).
 Special case: If probability is set to 0xFFFFFFFF then the probability of
 transmission is set to one.
 
@@ -157,35 +171,39 @@ controlled with a particular duty cycle like so:
 
 Special case: a `period_steps` of 0 disables this feature.
 
-### 0x24: `NT_CMD_KEY`
+### 0x24: `NT_CMD_SOURCE_KEY`
 
     +------------------+------------------+
-    | 0x25             | key              |
+    | 0x25 | src<<8    | key              |
     +------------------+------------------+
           1 word             1 word
 
-Sets the top 24 bits of the MC packet key to use for generated packets. The
-bottom 8 bits of the key supplied are ignored. The lower 8 bits are sent with
-incrementing values to allow for (most) packet mis-orderings to be detected at
-the receiver.
+Sets the top 24 bits of the MC packet key to use for generated packets for the
+source indicated by bits 15:8 of the command word.
+
+The bottom 8 bits of the key supplied are ignored. The lower 8 bits are sent
+with incrementing values to allow for (most) packet mis-orderings to be
+detected at the receiver.
 
 ### 0x25: `NT_CMD_PAYLOAD`
 
     +------------------+
-    | 0x26             |
+    | 0x26 | src<<8    |
     +------------------+
           1 word
 
-Enables the sending of MC packets with payloads.
+Enables the sending of MC packets with payloads for generated packets for the
+source indicated by bits 15:8 of the command word.
 
 ### 0x26: `NT_CMD_NO_PAYLOAD`
 
     +------------------+
-    | 0x27             |
+    | 0x27 | src<<8    |
     +------------------+
           1 word
 
-Disables the sending of MC packets with payloads.
+Disables the sending of MC packets with payloads for generated packets for the
+source indicated by bits 15:8 of the command word.
 
 
 Packet consumption commands
@@ -215,3 +233,16 @@ prevents the consumption of packets when not in `NT_CMD_CONSUME`.
 Note that it is strongly advised that after a period of non-consumption,
 consumption be re-enabled and a short sleep performed to drain the network
 before exiting or syncing.
+
+
+### 0x32: `NT_CMD_SINK_KEY`
+
+    +------------------+------------------+
+    | 0x32 | snk<<8    | key              |
+    +------------------+------------------+
+          1 word             1 word
+
+Sets the top 24 bits of the MC packet key expected for the sink number
+indicated by bits 15:8 of the command.
+
+The bottom 8 bits of the key supplied are ignored.
