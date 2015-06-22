@@ -1,185 +1,231 @@
 """Top level experiment object."""
 
-import pkg_resources
+from collections import OrderedDict
 
-import struct
+from weakref import WeakKeyDictionary
 
-from six import itervalues
-
-import time
-
-from rig.bitfield import BitField
-from rig.netlist import Net
-from rig.machine import Cores, SDRAM
-from rig.place_and_route import place, allocate, route
-from rig.place_and_route.constraints import ReserveResourceConstraint
-from rig.place_and_route.utils import build_application_map, build_routing_tables
-
-from .network_node import NetworkNode
+from rig.machine_control import MachineController
 
 
-class Experiment(object):
-    """An experiment."""
+class Group(object):
+    """An experimental group."""
     
-    def __init__(self, machine_controller):
-        """Create an experiment.
-        
-        Paramters
-        ---------
-        machine_controller : :py:class:`rig.machine_control.MachineController`
-            A machine controller connected to an available SpiNNaker machine to
-            use for this experiment.
-        """
-        self.mc = machine_controller
-        
-        # Routing keyspace definitions
-        self._keyspace = BitField(32)
-        
-        # Field which will contain a unique (though wrapping...) identifier code
-        # for each packet sent.
-        self._keyspace.add_field("seq_num", 16, 0, tags="SeqNum")
-        
-        # Field which identifies which traffic node produced a given packet.
-        self._keyspace.add_field("traffic_node", 16, 16, tags="Routing")
-        
-        # Incrementing counter used to allocate keyspace "traffic_node" keys to
-        # trafic nodes.
-        self._next_traffic_node_key = 0
-        
-        # A list of the network node objects involved in the experiment
-        self.nns = []
-        
-        # Duration of the last experiment run (seconds)
-        self.duration = 0.0
-    
-    def _get_traffic_node_key(self):
-        """Produce a new BitField with a unique traffic_node value."""
-        key = self._next_traffic_node_key
-        self._next_traffic_node_key += 1
-        return self._keyspace(traffic_node=key)
-    
-    def new_network_node(self):
-        """Create a new :py:class:`network_tester.NetworkNode` and return it."""
-        nn = NetworkNode(self)
-        self.nns.append(nn)
-        return nn
+    def __init__(self):
+        self._labels = OrderedDict()
     
     
-    def _place_and_route(self, machine):
-        """Perform placement on the experiment's nodes.
-        
-        Sets the positional metadata of all nodes and generates placement
-        and routing data for all nodes.
-        
-        Arguments
-        ---------
-        machine : :py:class:`rig.machine.Machine`
-            The machine model describing the machine onto which the network
-            tester should be placed and routed.
-        
-        Returns
-        -------
-        (application_map, routing_tables)
-            Where `application_map` is of the type suitable for
-            :py:meth:`rig.machine_control.MachineController.load_application`
-            and `routing_tables` is of a type suitable for use with
-            :py:meth:`rig.machine_control.MachineController.load_routing_tables`.
-        """
-        # Assign one core to each network node and enough SDRAM to store the
-        # network node config data plus a 32-bit size prefix.
-        vertices_resources = {nn: {Cores: 1, SDRAM: 4 + nn.get_config_data_size()}
-                              for nn in self.nns}
-        
-        # Create a net for each traffic node (though Nets must only refer to
-        # network nodes)
-        tn_to_net = {}
-        nets = []
-        for nn in self.nns:
-            for tn in nn.tns:
-                net = Net(nn, list(set(sink.network_node
-                                       for sink in tn.sinks)))
-                nets.append(net)
-                tn_to_net[tn] = net
-        
-        # Don't allocate the core used as the monitor processor
-        constraints = [ReserveResourceConstraint(Cores, slice(0, 1))]
-        
-        # Place-and-Route
-        placements = place(vertices_resources, nets, machine, constraints)
-        allocations = allocate(vertices_resources, nets, machine, constraints,
-                               placements)
-        routes = route(vertices_resources, nets, machine, constraints,
-                       placements, allocations)
-        
-        # Add placement metadata to all network nodes
-        for nn in self.nns:
-            x, y = placements[nn]
-            core = allocations[nn][Cores].start
-            nn.location = (x, y, core)
-        
-        # Build application map to facilitate the loading of binaries
-        binary = pkg_resources.resource_filename(
-            "network_tester", "binaries/network_tester.aplx")
-        application_map = build_application_map({nn: binary for nn in self.nns},
-                                                placements, allocations)
-        
-        # Build the full set of routing tables
-        net_keys = {}
-        for nn in self.nns:
-            for tn in nn.tns:
-                net_keys[tn_to_net[tn]] = (tn.key.get_value("Routing"),
-                                           tn.key.get_mask("Routing"))
-        routing_tables = build_routing_tables(routes, net_keys)
-        
-        return application_map, routing_tables
-    
-    def _load_sdram(self):
-        """Allocate SDRAM blocks for network node configuration and load the
-        associated data."""
-        for nn in self.nns:
-            x, y, core = nn.location
-            nn.sdram = self.mc.sdram_alloc_as_filelike(
-                nn.get_config_data_size(), tag=core, x=x, y=y)
-            
-            nn.write_config_data()
-    
-    def run(self, duration):
-        """Load the experiment onto the machine and run it.
+    def add_label(self, name, value):
+        """Set the value of a label column for this group.
         
         Parameters
         ----------
-        duration : float
-            Seconds to run the experiment for.
+        name : str
+            The name of the column
+        value
+            The value in the column for results in this group.
         """
-        self.duration = duration
+        self._labels[name] = value
+
+
+class Node(object):
+    """A node in the experiment.
+    
+    A node represents a single core running a traffic generator/consumer.
+    """
+    
+    def __init__(self, experiment):
+        self.experiment = experiment
+    
+    
+    class _Option(object):
+        """A descriptor which provides access to the experiment's _values
+        dictionary."""
         
-        machine = self.mc.get_machine()
-        application_map, routing_tables = self._place_and_route(machine)
-        self.mc.load_routing_tables(routing_tables)
-        self._load_sdram()
-        self.mc.load_application(application_map)
+        def __init__(self, option):
+            self.option = option
         
-        # Wait for the experiment to complete
-        time.sleep(duration)
-        self.mc.wait_for_cores_to_reach_state("exit", len(self.nns))
+        def __get__(self, obj, type=None):
+            return obj.experiment._get_option_value(
+                self.option, obj.experiment.cur_group, self)
+        
+        def __set__(self, obj, value):
+            return obj.experiment._set_option_value(
+                self.option, value, obj.experiment.cur_group, self)
+    
+    seed = _Option("seed")
+    
+    record_sent = _Option("record_sent")
+    record_blocked = _Option("record_blocked")
+    record_received = _Option("record_received")
+    
+    probability = _Option("probability")
+    
+    burst_period = _Option("burst_period")
+    burst_duty = _Option("burst_duty")
+    burst_phase = _Option("burst_phase")
+    
+    key = _Option("key")
+    
+    use_payload = _Option("use_payload")
+    
+    consume_packets = _Option("consume_packets")
+
+
+class Experiment(object):
+    """A network experiment."""
+    
+    def __init__(self, hostname_or_machine_controller):
+        """Create a network experiment.
+        
+        Paramters
+        ---------
+        hostname_or_machine_controller : \
+                str or :py:class:`rig.machine_control.MachineController`
+            The hostname of a SpiNNaker machine or a machine controller
+            connected to an available SpiNNaker machine to use for this
+            experiment.
+        """
+        if isinstance(hostname_or_machine_controller, str):
+            self.mc = MachineController(hostname_or_machine_controller)
+        else:
+            self.mc = hostname_or_machine_controller
+        
+        # The experimental group currently being defined
+        self._cur_group = None
+        
+        # A list of experimental groups which have been defined
+        self._groups = []
+        
+        # A list of experimental nodes
+        self._nodes = []
+        
+        # Holds the value of every option along with any special cases.
+        # * The global default value has group == node == None.
+        # * The value for a group has group==group and node==None.
+        # * The value for a node has node==node and group==None.
+        # * The value for a node and group has node==node and group==group.
+        # {option: {(group, node): value, ...}, ...}
+        self._values = {
+            "seed": {(None, None): None},
+            "timestep": {(None, None): 0.001},
+            "record_local_multicast": {(None, None): False},
+            "record_external_multicast": {(None, None): False},
+            "record_local_p2p": {(None, None): False},
+            "record_external_p2p": {(None, None): False},
+            "record_local_nearest_neighbour": {(None, None): False},
+            "record_external_nearest_neighbour": {(None, None): False},
+            "record_local_fixed_route": {(None, None): False},
+            "record_external_fixed_route": {(None, None): False},
+            "record_dropped_multicast": {(None, None): False},
+            "record_dropped_p2p": {(None, None): False},
+            "record_dropped_nearest_neighbour": {(None, None): False},
+            "record_dropped_fixed_route": {(None, None): False},
+            "record_counter12": {(None, None): False},
+            "record_counter13": {(None, None): False},
+            "record_counter14": {(None, None): False},
+            "record_counter15": {(None, None): False},
+            "record_sent": {(None, None): False},
+            "record_blocked": {(None, None): False},
+            "record_received": {(None, None): False},
+            "record_interval": {(None, None): 0.0},
+            "probability": {(None, None): 0.0},
+            "burst_period": {(None, None): 0.0},
+            "burst_duty": {(None, None): 0.0},
+            "burst_phase": {(None, None): 0.0},
+        }
+    
+    
+    def new_node(self):
+        """Return a new traffic generator/consumer node."""
+        n = Node(self)
+        self._nodes.append(n)
+        return n
+    
     
     @property
-    def num_sent(self):
-        """A dictionary from (x, y) to router multicast packet count.
+    def cur_group(self):
+        """Get the unique identifier of the experimental group currently being
+        defined (or None if no group is being defined)."""
         
-        Reports the difference between the number of MC packets sent before and
-        after the experiment has been run (based on router registers.
-        """
-        # TODO
-        raise NotImplementedError()
+        return self._cur_group
     
     
-    @property
-    def num_dropped(self):
-        """A dictionary from (x, y) to router multicast packet drop count.
+    def __enter__(self):
+        """Begin the definition of a new experimental group."""
+        if self._cur_group is not None:
+            raise Exception("Cannot nest experimental groups.")
+        g = Group()
+        self._groups.append(g)
+        self._cur_group = g
+        return g
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Completes the definition of an experimental group."""
+        self._cur_group = None
+    
+    
+    def _get_option_value(self, option, group=None, node=None):
+        """For internal use. Get an option's value for a given group/node."""
+        values = self._values.get(option, {})
         
-        Reports the difference between the number of MC packets dropped before
-        and after the experiment has been run (based on router registers.
-        """
-        # TODO
-        raise NotImplementedError()
+        global_value = values[(None, None)]
+        group_value = values.get((group, None), global_value)
+        node_value = values.get((None, node), group_value)
+        return values.get((group, node), node_value)
+    
+    
+    def _set_option_value(self, option, value, group=None, node=None):
+        """For internal use. Set an option's value for a given group/node."""
+        self._values[option][(group, node)] = value
+    
+    
+    class _Option(object):
+        """A descriptor which provides access to the _values dictionary."""
+        
+        def __init__(self, option):
+            self.option = option
+        
+        def __get__(self, obj, type=None):
+            return obj._get_option_value(self.option, obj.cur_group)
+        
+        def __set__(self, obj, value):
+            return obj._set_option_value(self.option, value, obj.cur_group)
+        
+    seed = _Option("seed")
+    
+    timestep = _Option("timestep")
+    
+    record_local_multicast = _Option("record_local_multicast")
+    record_external_multicast = _Option("record_external_multicast")
+    record_local_p2p = _Option("record_local_p2p")
+    record_external_p2p = _Option("record_external_p2p")
+    record_local_nearest_neighbour = _Option("record_local_nearest_neighbour")
+    record_external_nearest_neighbour = _Option("record_external_nearest_neighbour")
+    record_local_fixed_route = _Option("record_local_fixed_route")
+    record_external_fixed_route = _Option("record_external_fixed_route")
+    record_dropped_multicast = _Option("record_dropped_multicast")
+    record_dropped_p2p = _Option("record_dropped_p2p")
+    record_dropped_nearest_neighbour = _Option("record_dropped_nearest_neighbour")
+    record_dropped_fixed_route = _Option("record_dropped_fixed_route")
+    record_counter12 = _Option("record_counter12")
+    record_counter13 = _Option("record_counter13")
+    record_counter14 = _Option("record_counter14")
+    record_counter15 = _Option("record_counter15")
+    
+    record_sent = _Option("record_sent")
+    record_blocked = _Option("record_blocked")
+    record_received = _Option("record_received")
+    
+    record_interval = _Option("record_interval")
+    
+    probability = _Option("probability")
+    
+    burst_period = _Option("burst_period")
+    burst_duty = _Option("burst_duty")
+    burst_phase = _Option("burst_phase")
+    
+    key = _Option("key")
+    
+    use_payload = _Option("use_payload")
+    
+    consume_packets = _Option("consume_packets")
