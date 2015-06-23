@@ -283,7 +283,8 @@ bool run(uint32_t time_left_steps)
 	// packets generated is not correct.
 	bool deadline_missed = false;
 	
-	uint32_t next_timestep_ticks = tc2[TC_COUNT] - timestep_ticks;
+	// Tick 0 should occur immediately
+	uint32_t next_timestep_ticks = tc2[TC_COUNT];
 	
 	// This value counts down until the next recording should be made.
 	uint32_t record_elapsed_steps = 0;

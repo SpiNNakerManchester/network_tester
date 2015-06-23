@@ -4,12 +4,12 @@ from six import integer_types
 
 from mock import Mock
 
-from network_tester.application import NT_CMD, Application
+from network_tester.commands import NT_CMD, Commands
 
 
 def test_exited_only_once():
     # Exiting the application should prevent any further commands being added.
-    a = Application()
+    a = Commands()
     
     a.exit()
     assert a._commands == [NT_CMD.EXIT]
@@ -20,21 +20,21 @@ def test_exited_only_once():
 
 def test_sleep():
     # Make sure unit conversions work out correctly
-    a = Application()
+    a = Commands()
     a.sleep(0.000001)
     assert a._commands == [NT_CMD.SLEEP, 1]
 
 
 def test_barrier():
     # Make sure barriers are added
-    a = Application()
+    a = Commands()
     a.barrier()
     assert a._commands == [NT_CMD.BARRIER]
 
 
 def test_seed():
     # Make sure seeding works as expected
-    a = Application()
+    a = Commands()
     
     # Should be able to seed automatically
     a.seed()
@@ -70,7 +70,7 @@ def test_seed():
 
 def test_timestep():
     # Make sure setting the timestep works correctly
-    a = Application()
+    a = Commands()
     a.timestep(1e-9)
     assert a._commands == [NT_CMD.TIMESTEP, 1]
     
@@ -86,7 +86,7 @@ def test_timestep():
 
 def test_run():
     # Make sure running converts from seconds correctly
-    a = Application()
+    a = Commands()
     a.timestep(1e-9)
     a.run(1e-6)
     assert a._commands[2:] == [NT_CMD.RUN, 1000]
@@ -94,7 +94,7 @@ def test_run():
 
 def test_num():
     # Make sure setting number of sources and sinks works correctly
-    a = Application()
+    a = Commands()
     a.num(0xAA, 0xBB)
     assert a._commands == [NT_CMD.NUM, 0xBBAA]
     
@@ -105,7 +105,7 @@ def test_num():
 
 def test_record():
     # Make sure setting recorded counters works
-    a = Application()
+    a = Commands()
     
     # Should not be able to record non-existant counters
     with pytest.raises(Exception):
@@ -133,7 +133,7 @@ def test_record():
 def test_record_interval():
     # Make sure the record interval is converted correctly and is updated when
     # the timestep changes.
-    a = Application()
+    a = Commands()
     
     a.timestep(1e-9)
     assert len(a._commands) == 2
@@ -163,7 +163,7 @@ def test_record_interval():
 
 def test_probability():
     # Make sure the probability can be changed.
-    a = Application()
+    a = Commands()
     
     a.num(2, 0)
     assert len(a._commands) == 2
@@ -200,7 +200,7 @@ def test_probability():
 def test_burst():
     # Make sure the burst mode can be changed (and that it is changed by
     # changing the timestep.
-    a = Application()
+    a = Commands()
     
     a.timestep(1e-9)
     assert len(a._commands) == 2
@@ -256,7 +256,7 @@ def test_burst():
 
 def test_source_key():
     # Make sure the source key can be changed.
-    a = Application()
+    a = Commands()
     
     a.num(2, 0)
     assert len(a._commands) == 2
@@ -285,7 +285,7 @@ def test_source_key():
 
 def test_payload():
     # Make sure the payload can be changed.
-    a = Application()
+    a = Commands()
     
     a.num(2, 0)
     assert len(a._commands) == 2
@@ -319,7 +319,7 @@ def test_payload():
 
 def test_consume():
     # Make sure the consumption mode can be changed.
-    a = Application()
+    a = Commands()
     
     # If not changed, shouldn't produce any commands
     a.consume(True)
@@ -342,7 +342,7 @@ def test_consume():
 
 def test_sink_key():
     # Make sure the source key can be changed.
-    a = Application()
+    a = Commands()
     
     a.num(0, 2)
     assert len(a._commands) == 2
@@ -367,3 +367,27 @@ def test_sink_key():
     a.sink_key(0, 0x00BEEFCC)
     a.sink_key(1, 0x00DEADDD)
     assert len(a._commands) == 6
+
+
+def test_size():
+    # Size should report correctly (including a prefix giving the length
+    a = Commands()
+    a.num(0, 0)
+    a.exit()
+    
+    assert len(a._commands) == 3
+    
+    assert a.size == 16
+
+
+def test_pack():
+    # Packing should work correctly
+    a = Commands()
+    a.num(0, 0)
+    a.exit()
+    
+    assert len(a._commands) == 3
+    
+    assert a.pack() == (b"\x0C\0\0\0"  # 12 bytes of commands
+                        b"\x06\0\0\0"b"\0\0\0\0"  # NT_CMD_NUM
+                        b"\x00\0\0\0")  # NT_CMD_EXIT

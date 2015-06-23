@@ -1,4 +1,7 @@
-"""Models a single network tester application to be run on SpiNNaker."""
+"""Command stream construction for the network tester application to be run on
+SpiNNaker."""
+
+import struct
 
 from functools import wraps
 
@@ -58,11 +61,13 @@ class RecordBits(IntEnum):
     received = 1 << 24
 
 
-class Application(object):
-    """A network tester application to run on SpiNNaker."""
+class Commands(object):
+    """A series of commands for a network tester application running on
+    SpiNNaker."""
     
     def __init__(self):
-        # The sequence of commands to be executed by this application
+        # The sequence of encoded commands to be executed, stored as a list of
+        # 32-bit integers.
         self._commands = []
         
         self._exited = False
@@ -104,6 +109,23 @@ class Application(object):
         self._current_burst_period = 0.0
         self._current_burst_duty = 0.0
         self._current_burst_phase = 0.0
+    
+    
+    @property
+    def size(self):
+        """Get the size in bytes of the packed set of commands"""
+        assert self._exited
+        # One 32-bit word per command entry plus a 32-bit prefix giving the
+        # length of the sequence of commands.
+        return (len(self._commands) + 1) * 4
+    
+    
+    def pack(self, format="<"):
+        """Return the commands as a packed set of bytes."""
+        assert self._exited
+        return struct.pack("{}{}I".format(format, len(self._commands) + 1),
+                           (len(self._commands) * 4),
+                           *self._commands)
     
     
     def exit(self):

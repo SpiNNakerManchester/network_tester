@@ -1,23 +1,37 @@
 """Top level experiment object."""
 
+import pkg_resources
+
+import time
+
 from collections import OrderedDict
+
+from six import iteritems, itervalues
 
 from rig.machine import Cores
 
 from rig.machine_control import MachineController
 
-from rig.netlist import Net
+from rig.netlist import Net as RigNet
 
 from rig.place_and_route import place, allocate, route
 
+from rig.place_and_route.utils import \
+    build_routing_tables, build_application_map
+
 from rig.place_and_route.constraints import ReserveResourceConstraint
+
+from network_tester.commands import Commands
+
+from network_tester.results import VertexResults
 
 
 class Group(object):
     """An experimental group."""
     
-    def __init__(self):
-        self._labels = OrderedDict()
+    def __init__(self, experiment):
+        self._experiment = experiment
+        self.labels = OrderedDict()
     
     
     def add_label(self, name, value):
@@ -30,7 +44,41 @@ class Group(object):
         value
             The value in the column for results in this group.
         """
-        self._labels[name] = value
+        self.labels[name] = value
+    
+    
+    def __enter__(self):
+        """Define parameters for this experimental group."""
+        if self._experiment._cur_group is not None:
+            raise Exception("Cannot nest experimental groups.")
+        self._experiment._cur_group = self
+        return self
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Completes the definition of this experimental group."""
+        self._experiment._cur_group = None
+    
+    
+    @property
+    def num_samples(self):
+        """Returns the number of recorded samples which will be made during
+        the running of this group.
+        
+        Note that this is in terms of *samples* and not in terms of the total
+        number of counter values recorded since the values recorded varies from
+        vertex to vertex.
+        """
+        duration = self._experiment._get_option_value("duration", self)
+        timestep = self._experiment._get_option_value("timestep", self)
+        record_interval = self._experiment._get_option_value("record_interval", self)
+        
+        run_steps = int(round(duration / timestep))
+        interval_steps = int(round(record_interval / timestep))
+        
+        if interval_steps == 0:
+            return 1
+        else:
+            return run_steps // interval_steps
 
 
 class Vertex(object):
@@ -52,17 +100,13 @@ class Vertex(object):
         
         def __get__(self, obj, type=None):
             return obj._experiment._get_option_value(
-                self.option, obj._experiment.cur_group, self)
+                self.option, obj._experiment.cur_group, obj)
         
         def __set__(self, obj, value):
             return obj._experiment._set_option_value(
-                self.option, value, obj._experiment.cur_group, self)
+                self.option, value, obj._experiment.cur_group, obj)
     
     seed = _Option("seed")
-    
-    record_sent = _Option("record_sent")
-    record_blocked = _Option("record_blocked")
-    record_received = _Option("record_received")
     
     probability = _Option("probability")
     
@@ -73,6 +117,34 @@ class Vertex(object):
     use_payload = _Option("use_payload")
     
     consume_packets = _Option("consume_packets")
+
+
+class Net(RigNet):
+    """A connection between vertices."""
+    
+    def __init__(self, experiment, *args, **kwargs):
+        super(Net, self).__init__(*args, **kwargs)
+        self._experiment = experiment
+    
+    
+    class _Option(object):
+        """A descriptor which provides access to the experiment's _values
+        dictionary."""
+        
+        def __init__(self, option):
+            self.option = option
+        
+        def __get__(self, obj, type=None):
+            return obj._experiment._get_option_value(
+                self.option, obj._experiment.cur_group, obj)
+        
+        def __set__(self, obj, value):
+            return obj._experiment._set_option_value(
+                self.option, value, obj._experiment.cur_group, obj)
+    
+    probability = _Option("probability")
+    
+    use_payload = _Option("use_payload")
 
 
 class Experiment(object):
@@ -118,37 +190,44 @@ class Experiment(object):
         self._nets = []
         
         # Holds the value of every option along with any special cases.
-        # * The global default value has group == vertex == None.
-        # * The value for a group has group==group and vertex==None.
-        # * The value for a vertex has vertex==vertex and group==None.
-        # * The value for a vertex and group has vertex==vertex and group==group.
-        # {option: {(group, vertex): value, ...}, ...}
+        # If a value can have per-node or per-group exceptions it is stored as
+        # a dictionary with keys (group, vert_or_net) with the value being defined
+        # as below. Otherwise, the value is just stored immediately in the
+        # _values dictionary. The list below gives the order of priority for
+        # definitions.
+        # * (None, None) The global default
+        # * (group, None) The default for a particular experimental group
+        # * (None, vertex) The default for a particular vertex
+        # * (None, net) The default for a particular net
+        # * (group, vertex) The value for a particular vertex in a specific group
+        # * (group, net) The value for a particular net in a specific group
+        # {option: value or {(group, vert_or_net): value, ...}, ...}
         self._values = {
             "seed": {(None, None): None},
             "timestep": {(None, None): 0.001},
             "warmup": {(None, None): 1.0},
             "duration": {(None, None): 1.0},
-            "cooldown": {(None, None): None},
-            "flush_time": {(None, None): 0.001},
-            "record_local_multicast": {(None, None): False},
-            "record_external_multicast": {(None, None): False},
-            "record_local_p2p": {(None, None): False},
-            "record_external_p2p": {(None, None): False},
-            "record_local_nearest_neighbour": {(None, None): False},
-            "record_external_nearest_neighbour": {(None, None): False},
-            "record_local_fixed_route": {(None, None): False},
-            "record_external_fixed_route": {(None, None): False},
-            "record_dropped_multicast": {(None, None): False},
-            "record_dropped_p2p": {(None, None): False},
-            "record_dropped_nearest_neighbour": {(None, None): False},
-            "record_dropped_fixed_route": {(None, None): False},
-            "record_counter12": {(None, None): False},
-            "record_counter13": {(None, None): False},
-            "record_counter14": {(None, None): False},
-            "record_counter15": {(None, None): False},
-            "record_sent": {(None, None): False},
-            "record_blocked": {(None, None): False},
-            "record_received": {(None, None): False},
+            "cooldown": {(None, None): 0.1},
+            "flush_time": {(None, None): 0.01},
+            "record_local_multicast": False,
+            "record_external_multicast": False,
+            "record_local_p2p": False,
+            "record_external_p2p": False,
+            "record_local_nearest_neighbour": False,
+            "record_external_nearest_neighbour": False,
+            "record_local_fixed_route": False,
+            "record_external_fixed_route": False,
+            "record_dropped_multicast": False,
+            "record_dropped_p2p": False,
+            "record_dropped_nearest_neighbour": False,
+            "record_dropped_fixed_route": False,
+            "record_counter12": False,
+            "record_counter13": False,
+            "record_counter14": False,
+            "record_counter15": False,
+            "record_sent": False,
+            "record_blocked": False,
+            "record_received": False,
             "record_interval": {(None, None): 0.0},
             "probability": {(None, None): 0.0},
             "burst_period": {(None, None): 0.0},
@@ -172,13 +251,19 @@ class Experiment(object):
     
     def new_net(self, *args, **kwargs):
         """Return a new net to connect a set of vertices."""
-        n = Net(*args, **kwargs)
+        n = Net(self, *args, **kwargs)
         
         # Adding a new net invalidates any routing solution.
         self.routes = None
         
         self._nets.append(n)
         return n
+    
+    
+    def new_group(self):
+        g = Group(self)
+        self._groups.append(g)
+        return g
     
     
     @property
@@ -189,23 +274,9 @@ class Experiment(object):
         return self._cur_group
     
     
-    def __enter__(self):
-        """Begin the definition of a new experimental group."""
-        if self._cur_group is not None:
-            raise Exception("Cannot nest experimental groups.")
-        g = Group()
-        self._groups.append(g)
-        self._cur_group = g
-        return g
-    
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Completes the definition of an experimental group."""
-        self._cur_group = None
-    
-    
-    def _any_router_registers_recorded(self, group=None):
+    def _any_router_registers_recorded(self):
         """Are any router registers being recorded?"""
-        return any(self._get_option_value(option, group)
+        return any(self._get_option_value(option)
                    for option in [
                        "record_local_multicast",
                        "record_external_multicast",
@@ -337,24 +408,344 @@ class Experiment(object):
                                 **allocate_kwargs)
     
     
-    def run(self):
-        """Run the experiment and return the results."""
-        self.place_and_route()
-    
-    
-    def _get_option_value(self, option, group=None, vertex=None):
-        """For internal use. Get an option's value for a given group/vertex."""
-        values = self._values.get(option, {})
+    def _construct_vertex_commands(self, vertex, source_nets, sink_nets,
+                                   net_keys, records):
+        """For internal use. Produce the Commands for a particular vertex.
         
-        global_value = values[(None, None)]
-        group_value = values.get((group, None), global_value)
-        vertex_value = values.get((None, vertex), group_value)
-        return values.get((group, vertex), vertex_value)
+        Parameters
+        ----------
+        vertex : :py:class:`.Vertex`
+            The vertex to pack
+        source_nets : [:py:class:`.Net`, ...]
+            The nets which are sourced at this vertex.
+        sink_nets : [:py:class:`.Net`, ...]
+            The nets which are sunk at this vertex.
+        net_keys : {:py:class:`.Net`: key, ...}
+            A mapping from net to routing key.
+        records : set([counter_name, ...])
+            The set of counters this vertex records
+        """
+        commands = Commands()
+        
+        # Set up the sources and sinks for the vertex
+        commands.num(len(source_nets), len(sink_nets))
+        for source_num, source_net in enumerate(source_nets):
+            commands.source_key(source_num, net_keys[source_net])
+        for sink_num, sink_net in enumerate(sink_nets):
+            commands.sink_key(sink_num, net_keys[sink_net])
+        
+        # Generate commands for each experimental group
+        for group in self._groups:
+            # Set general parameters for the group
+            commands.seed(self._get_option_value("seed", group))
+            commands.timestep(self._get_option_value("timestep", group))
+            commands.record_interval(self._get_option_value("record_interval", group))
+            
+            # Set vertex parameters for the group
+            commands.burst(
+                self._get_option_value("burst_period", group, vertex),
+                self._get_option_value("burst_duty", group, vertex),
+                self._get_option_value("burst_phase", group, vertex))
+            
+            # Set source parameters for the group
+            for source_num, source_net in enumerate(source_nets):
+                commands.probability(
+                    source_num,
+                    self._get_option_value("probability",
+                                           group, 
+                                           source_net))
+                commands.payload(
+                    source_num,
+                    self._get_option_value("use_payload",
+                                           group, 
+                                           source_net))
+            
+            # Synchronise before running the group
+            commands.barrier()
+            
+            # Turn off consumption at the last possible moment
+            commands.consume(
+                self._get_option_value("consume_packets", group, vertex))
+            
+            # warming up without recording data
+            commands.record()
+            commands.run(self._get_option_value("warmup", group))
+            
+            # Run the actual experiment and record results
+            commands.record(**{c: True for c in records})
+            commands.run(self._get_option_value("duration", group))
+            
+            # Run without recording (briefly) after the experiment to allow
+            # for clock skew between cores.
+            commands.record()  # Record nothing during cooldown
+            commands.run(self._get_option_value("cooldown", group))
+            
+            # Turn consumption back on after the run
+            commands.consume(True)
+            
+            # Drain the network of any remaining packets
+            commands.sleep(self._get_option_value("flush_time", group))
+        
+        # Finally, terminate
+        commands.exit()
+        
+        return commands
     
     
-    def _set_option_value(self, option, value, group=None, vertex=None):
-        """For internal use. Set an option's value for a given group/vertex."""
-        self._values[option][(group, vertex)] = value
+    def _add_router_recording_vertices(self):
+        """Adds extra vertices to chips with no other vertices to facilitate
+        recording of router counter values, if necessary.
+        
+        Returns
+        -------
+        (vertices, router_recording_vertices, placements, allocations, routes)
+            vertices is a list containing all vertices (including any added for
+            router-recording purposes).
+            
+            router_recording_vertices is a dictionary {(x, y): vertex, ...}
+            giving the vertex on each chip which will be tasked with recording
+            router counters.
+            
+            placements, allocations and routes are updated sets of placements
+            accounting for any new router-recording vertices.
+        """
+        # Make a local list of vertices, placements and allocations in the
+        # model. This may be extended with extra vertices for recording router
+        # counter values.
+        vertices = self._vertices.copy()
+        placements = self.placements.copy()
+        allocations = self.allocations.copy()
+        routes = self.routes.copy()  # Not actually modified at present
+        
+        # {(x, y): vertex, ...} giving the vertex whose job it is on each chip
+        # to record router activity.
+        router_recording_vertices = {}
+        
+        # If router information is being recorded, a vertex must be assigned on
+        # every chip to recording router counters.
+        if self._any_router_registers_recorded():
+            # Assign the job of recording router values to an arbitrary vertex
+            # on every chip which already has vertices on it.
+            for vertex, placement in iteritems(self.placements):
+                router_recording_vertices[placement] = vertex
+            
+            # If there are chips without any vertices allocated, new
+            # router-recording-only vertices must be added.
+            for xy in self.machine:
+                if xy not in router_recording_vertices:
+                    # Create a new vertex for recording of router data only.
+                    vertex = Vertex(self)
+                    vertex.record_sent = False
+                    vertex.record_blocked = False
+                    vertex.record_received = False
+                    router_recording_vertices[xy] = vertex
+                    placements[vertex] = xy
+                    allocations[vertex] = {Cores: slice(1, 2)}
+                    vertices.append(vertex)
+        
+        return (vertices, router_recording_vertices,
+                placements, allocations, routes)
+    
+    
+    def _get_vertex_record_lookup(self, vertices, router_recording_vertices):
+        """Generates a lookup from vertex to a set of counter names that vertex
+        records.
+        
+        Parameters
+        ----------
+        vertices : [:py:class:`.Vertex`, ...]
+        router_recording_vertices : {(x, y): :py:class:`.Vertex`, ...}
+        
+        Returns
+        -------
+        vertices_records : {vertex: set([counter_name, ...]), ...}
+        """
+        # Get the set of router registers names to be recorded.
+        recorded_router_registers = set([
+            counter for counter in [
+                "local_multicast",
+                "external_multicast",
+                "local_p2p",
+                "external_p2p",
+                "local_nearest_neighbour",
+                "external_nearest_neighbour",
+                "local_fixed_route",
+                "external_fixed_route",
+                "dropped_multicast",
+                "dropped_p2p",
+                "dropped_nearest_neighbour",
+                "dropped_fixed_route",
+                "counter12",
+                "counter13",
+                "counter14",
+                "counter15",
+            ]
+            if self._get_option_value("record_{}".format(counter))
+        ])
+        
+        # Get the set of recorded counters for each vertex
+        # {vertex, set([counter_name, ...])}
+        vertices_records = {}
+        for vertex in vertices:
+            records = set([
+                counter for counter in ["sent", "blocked", "received"]
+                if self._get_option_value("record_{}".format(counter))
+            ])
+            if vertex in itervalues(router_recording_vertices):
+                records.update(recorded_router_registers)
+            vertices_records[vertex] = records
+        
+        return vertices_records
+    
+    
+    def run(self, app_id=0x42):
+        """Run the experiment and return the results."""
+        # Place and route the vertices (if required)
+        self.place_and_route()
+        
+        # Add nodes to unused chips to record router counters (if necessary).
+        (vertices, router_recording_vertices,
+            placements, allocations, routes) = \
+                self._add_router_recording_vertices()
+        
+        # Assign a unique routing key to each net
+        net_keys = {net: num << 8
+                    for num, net in enumerate(self._nets)}
+        routing_tables = build_routing_tables(
+            routes,
+            {net: (key, 0xFFFFFF00) for net, key in iteritems(net_keys)})
+        
+        # Specify the appropriate binary for the network tester vertices.
+        binary = pkg_resources.resource_filename(
+            "network_tester", "binaries/network_tester.aplx")
+        application_map = build_application_map(
+            {vertex: binary for vertex in vertices},
+            placements, allocations)
+        
+        vertices_records = self._get_vertex_record_lookup(
+            vertices, router_recording_vertices)
+        
+        # Get the set of source and sink nets for each vertex. Also sets an
+        # explicit ordering of the sources/sinks within each.
+        # {vertex: [source_or_sink, ...], ...}
+        vertex_source_nets = {v: [] for v in vertices}
+        vertex_sink_nets = {v: [] for v in vertices}
+        for net in self._nets:
+            vertex_source_nets[net.source].append(net)
+            for sink in net.sinks:
+                vertex_sink_nets[sink].append(net)
+        
+        # Fill out the set of commands for each vertex
+        vertices_commands = {
+            vertex: self._construct_vertex_commands(
+                vertex=vertex,
+                source_nets=vertex_source_nets[vertex],
+                sink_nets=vertex_sink_nets[vertex],
+                net_keys=net_keys,
+                records=vertices_records[vertex])
+            for vertex in vertices
+        }
+        
+        # A Result object for each vertex
+        vertices_results = {
+            vertex: VertexResults(vertices_records[vertex], self._groups)
+            for vertex in vertices}
+        
+        # Actually load and run the experiment on the machine.
+        with self._mc.application(app_id):
+            # Allocate the SDRAM required to allocate each vertex's SDRAM. This is
+            # enough to fit the commands and also any recored results.
+            samples_per_vertex = sum(g.num_samples for g in self._groups)
+            vertices_sdram = {}
+            for vertex in vertices:
+                size = max(
+                    # Size of commands (with length prefix)
+                    vertices_commands[vertex].size,
+                    # Size of results (plus the flags)
+                    vertices_results[vertex].size,
+                )
+                x, y = placements[vertex]
+                p = allocations[vertex][Cores].start
+                vertices_sdram[vertex] = self._mc.sdram_alloc_as_filelike(
+                    size, x=x, y=y, tag=p)
+            
+            # Load each vertex's commands
+            for vertex, sdram in iteritems(vertices_sdram):
+                sdram.write(vertices_commands[vertex].pack())
+            
+            # Load routing tables
+            self._mc.load_routing_tables(routing_tables)
+            
+            # Load the application
+            self._mc.load_application(application_map)
+            
+            # Run through each experimental group
+            next_barrier = "sync0"
+            for group in self._groups:
+                # Reach the barrier before the run starts
+                self._mc.wait_for_cores_to_reach_state(
+                    next_barrier, len(vertices))
+                self._mc.send_signal(next_barrier)
+                next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
+                
+                # Give the run time to complete
+                warmup = self._get_option_value("warmup", group)
+                duration = self._get_option_value("duration", group)
+                cooldown = self._get_option_value("cooldown", group)
+                flush_time = self._get_option_value("flush_time", group)
+                time.sleep(warmup + duration + cooldown + flush_time)
+            
+            # Wait for all cores to exit after their final run
+            self._mc.wait_for_cores_to_reach_state("exit", len(vertices))
+            
+            # Read recorded data back
+            for vertex, sdram in iteritems(vertices_sdram):
+                sdram.seek(0)
+                results = vertices_results[vertex]
+                results.unpack(sdram.read(results.size))
+        
+        # Process read results
+        print(vertices_results)
+    
+    
+    def _get_option_value(self, option, group=None, vert_or_net=None):
+        """For internal use. Get an option's value for a given
+        group/vertex/net."""
+        
+        values = self._values[option]
+        if isinstance(values, dict):
+            if isinstance(vert_or_net, Net):
+                vertex = vert_or_net.source
+                net = vert_or_net
+            else:
+                vertex = vert_or_net
+            
+            global_value = values[(None, None)]
+            group_value = values.get((group, None), global_value)
+            vertex_value = values.get((None, vertex), group_value)
+            group_vertex_value = values.get((group, vertex), vertex_value)
+            
+            if isinstance(vert_or_net, Net):
+                net_value = values.get((None, net), group_vertex_value)
+                group_net_value = values.get((group, net), net_value)
+                return group_net_value
+            else:
+                return group_vertex_value
+        else:
+            return values
+    
+    
+    def _set_option_value(self, option, value, group=None, vert_or_net=None):
+        """For internal use. Set an option's value for a given group/vertex/net."""
+        values = self._values[option]
+        if isinstance(values, dict):
+            values[(group, vert_or_net)] = value
+        else:
+            if group is not None or vert_or_net is not None:
+                raise ValueError(
+                    "Cannot set {} option on a group-by-group, "
+                    "vertex-by-vertex or net-by-net basis.".format(option))
+            self._values[option] = value
     
     
     class _Option(object):
