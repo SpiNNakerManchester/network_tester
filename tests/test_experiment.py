@@ -14,6 +14,10 @@ from network_tester.commands import Commands, NT_CMD
 
 from network_tester.counters import Counters
 
+from network_tester.errors import NetworkTesterError
+
+from network_tester.results import Results
+
 
 def test_hostname_or_machine_controler(monkeypatch):
     # If a hostname is passed in, a new MC should be made
@@ -690,3 +694,109 @@ def test_get_vertex_record_lookup():
                   (net0, Counters.received)],
         vertex1: [(net1, Counters.received)],
     }
+
+
+
+@pytest.mark.parametrize("samples_per_group",
+                         [[],  # No groups
+                          [1],
+                          [1, 100]])
+@pytest.mark.parametrize("num_vertices", [0, 1, 2])
+@pytest.mark.parametrize("num_nets_per_vertex", [0, 1, 2])
+@pytest.mark.parametrize("error,error_code", [(False, b"\0\0\0\0"),
+                                              (True, b"\x20\0\0\0"),
+                                             ])
+@pytest.mark.parametrize("record", [True, False])
+def test_run(samples_per_group, num_vertices, num_nets_per_vertex,
+             error, error_code, record):
+    """Make sure that the run command carries out an experiment as would be
+    expected."""
+    machine = Machine(3, 1)
+    
+    mock_mc = Mock()
+    mock_mc.get_machine.return_value = machine
+    
+    mock_application_ctx = Mock()
+    mock_application_ctx.__enter__ = Mock()
+    mock_application_ctx.__exit__ = Mock()
+    mock_mc.application.return_value = mock_application_ctx
+    
+    mock_mc.get_machine.return_value = machine
+    
+    def mock_sdram_file_read(size):
+        return error_code + b"\0"*(size - 4)
+    mock_sdram_file = Mock()
+    mock_sdram_file.read.side_effect = mock_sdram_file_read
+    
+    mock_mc.sdram_alloc_as_filelike.return_value = mock_sdram_file
+    
+    e = Experiment(mock_mc)
+    e.timestep = 1e-6
+    e.warmup = 0.01
+    e.duration = 0.01
+    e.cooldown = 0.01
+    e.flush_time = 0.01
+    
+    # Record the result of _construct_vertex_commands to allow checking of
+    # memory allocation sizes
+    construct_vertex_commands = e._construct_vertex_commands
+    vertices_commands = {}
+    def wrapped_construct_vertex_commands(vertex, *args, **kwargs):
+        commands = construct_vertex_commands(vertex=vertex, *args, **kwargs)
+        vertices_commands[vertex] = commands
+        return commands
+    e._construct_vertex_commands = Mock(
+        side_effect=wrapped_construct_vertex_commands)
+    
+    if record:
+        e.record_sent = True
+    
+    # Create example vertices
+    vertices = [e.new_vertex() for _ in range(num_vertices)]
+    nets = [e.new_net(v, v)
+            for _ in range(num_nets_per_vertex)
+            for v in vertices]
+    
+    # Vertices are placed on sequential chips along the x-axis
+    e.placements = {v: (x, 0) for x, v in enumerate(vertices)}
+    
+    # Create example groups
+    for num_samples in samples_per_group:
+        with e.new_group():
+            e.record_interval = e.duration / float(num_samples)
+    
+    # The run should fail with an exception when expected.
+    if error and num_vertices > 0:
+        with pytest.raises(NetworkTesterError) as exc_info:
+            e.run(0x33)
+        results = exc_info.value.results
+    else:
+        results = e.run(0x33)
+    
+    # The results should be of the correct type...
+    assert isinstance(results, Results)
+    
+    # The results returned should be all zeros (since that is what was written
+    # back)
+    if record and num_vertices > 0 and num_nets_per_vertex > 0:
+        assert sum(results.totals()["sent"]) == 0
+    
+    # The supplied app ID should be used
+    mock_mc.application.assert_called_once_with(0x33)
+    
+    # Each chip should have been issued with a suitable malloc for any vertices
+    # on it.
+    for x, vertex in enumerate(vertices):
+        cmds_size = vertices_commands[vertex].size
+        if record:
+            # The space required to record the sent counters.
+            result_size = (1 + (num_nets_per_vertex *
+                                sum(samples_per_group))) * 4
+        else:
+            result_size = 4  # Just the status value
+        size = max(cmds_size, result_size)
+        print(mock_mc.sdram_alloc_as_filelike.mock_calls)
+        mock_mc.sdram_alloc_as_filelike.assert_any_call(size, x=x, y=0, tag=1)
+    
+    # The correct number of barriers should have been reached
+    assert len(mock_mc.send_signal.mock_calls) == len(samples_per_group)

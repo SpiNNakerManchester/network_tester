@@ -346,7 +346,7 @@ class Experiment(object):
     
     
     def place_and_route(self,
-                        constraints=[],
+                        constraints=None,
                         place=place, place_kwargs={},
                         allocate=allocate, allocate_kwargs={},
                         route=route, route_kwargs={}):
@@ -387,6 +387,7 @@ class Experiment(object):
                               self._vertices}
         
         # Reserve the monitor processor for each chip
+        constraints = constraints or []
         constraints += [ReserveResourceConstraint(Cores, slice(0, 1))]
         
         if self.placements is None:
@@ -684,9 +685,8 @@ class Experiment(object):
         
         # Actually load and run the experiment on the machine.
         with self._mc.application(app_id):
-            # Allocate the SDRAM required to allocate each vertex's SDRAM. This is
-            # enough to fit the commands and also any recored results.
-            samples_per_vertex = sum(g.num_samples for g in self._groups)
+            # Allocate SDRAM. This is enough to fit the commands and also any
+            # recored results.
             vertices_sdram = {}
             for vertex in vertices:
                 size = max(
@@ -715,7 +715,7 @@ class Experiment(object):
             for group in self._groups:
                 # Reach the barrier before the run starts
                 self._mc.wait_for_cores_to_reach_state(
-                    next_barrier, len(vertices))
+                    next_barrier, len(vertices), timeout=2.0)
                 self._mc.send_signal(next_barrier)
                 next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
                 
@@ -727,7 +727,8 @@ class Experiment(object):
                 time.sleep(warmup + duration + cooldown + flush_time)
             
             # Wait for all cores to exit after their final run
-            self._mc.wait_for_cores_to_reach_state("exit", len(vertices))
+            self._mc.wait_for_cores_to_reach_state("exit", len(vertices),
+                                                   timeout=2.0)
             
             # Read recorded data back
             for vertex, sdram in iteritems(vertices_sdram):
