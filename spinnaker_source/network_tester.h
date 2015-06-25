@@ -17,7 +17,7 @@
 #define MAX(a, b) (((a) < (b)) ? (b) : (a))
 #endif
 
-
+// Debug/info printing macros
 #if false
 #define DEBUG(...) io_printf(IO_BUF, "DEBUG: " __VA_ARGS__)
 #else
@@ -28,7 +28,7 @@
 
 #define ERROR(...) io_printf(IO_BUF, "ERROR: " __VA_ARGS__)
 
-
+// Command codes
 #define NT_CMD_EXIT 0x00
 #define NT_CMD_SLEEP 0x01
 #define NT_CMD_BARRIER 0x02
@@ -51,6 +51,14 @@
 #define NT_CMD_CONSUME 0x30
 #define NT_CMD_NO_CONSUME 0x31
 #define NT_CMD_SINK_KEY 0x32
+
+// Error status bits
+#define NT_ERR_STILL_RUNNING (1 << 0)
+#define NT_ERR_MALLOC (1 << 1)
+#define NT_ERR_DMA (1 << 2)
+#define NT_ERR_UNKNOWN_COMMAND (1 << 3)
+#define NT_ERR_BAD_ARGUMENTS (1 << 4)
+#define NT_ERR_DEADLINE_MISSED (1 << 5)
 
 
 /**

@@ -8,8 +8,11 @@ from rig.netlist import Net
 
 from rig.machine import Machine
 
-from network_tester.experiment import Experiment
+from network_tester.experiment import Experiment, Vertex, Net, Group
+
 from network_tester.commands import Commands, NT_CMD
+
+from network_tester.counters import Counters
 
 
 def test_hostname_or_machine_controler(monkeypatch):
@@ -24,6 +27,49 @@ def test_hostname_or_machine_controler(monkeypatch):
     # If an MC is passed in, that should be used
     Experiment(mock_mc)
     assert not mock_mc.called
+
+
+def test_new_functions():
+    # Make sure the e.new_* functions all work as expected
+    e = Experiment(Mock())
+    
+    # Types should be appropriate
+    vertex0 = e.new_vertex()
+    assert isinstance(vertex0, Vertex)
+    net0 = e.new_net(vertex0, vertex0)
+    assert isinstance(net0, Net)
+    group0 = e.new_group()
+    assert isinstance(group0, Group)
+    
+    # Everything should be given unique names
+    vertex1 = e.new_vertex()
+    net1 = e.new_net(vertex1, vertex1)
+    group1 = e.new_group()
+    assert vertex0.name != vertex1.name
+    assert net0.name != net1.name
+    assert group0.name != group1.name
+    
+    # Custom names should be allowed
+    vertex_foo = e.new_vertex(name="foo")
+    net_bar = e.new_net(vertex_foo, vertex_foo, name="bar")
+    group_baz = e.new_group(name="baz")
+    assert vertex_foo.name == "foo"
+    assert net_bar.name == "bar"
+    assert group_baz.name == "baz"
+    
+    # The objects should all give their name/type in their repr string
+    assert repr(vertex0) == "<Vertex 0>"
+    assert repr(net0) == "<Net 0>"
+    assert repr(group0) == "<Group 0>"
+    
+    assert repr(vertex1) == "<Vertex 1>"
+    assert repr(net1) == "<Net 1>"
+    assert repr(group1) == "<Group 1>"
+    
+    assert repr(vertex_foo) == "<Vertex 'foo'>"
+    assert repr(net_bar) == "<Net 'bar'>"
+    assert repr(group_baz) == "<Group 'baz'>"
+    
 
 
 def test_option_getters_setters():
@@ -337,24 +383,7 @@ def test_machine(monkeypatch):
 
 
 @pytest.mark.parametrize("router_register",
-    [
-        "local_multicast",
-        "external_multicast",
-        "local_p2p",
-        "external_p2p",
-        "local_nearest_neighbour",
-        "external_nearest_neighbour",
-        "local_fixed_route",
-        "external_fixed_route",
-        "dropped_multicast",
-        "dropped_p2p",
-        "dropped_nearest_neighbour",
-        "dropped_fixed_route",
-        "counter12",
-        "counter13",
-        "counter14",
-        "counter15",
-    ])
+    [c.name for c in Counters if c.router_counter])
 def test_any_router_registers_recorded(router_register):
     # Should return true if any router register is set to be recorded
     e = Experiment(Mock())
@@ -508,13 +537,13 @@ def test_construct_vertex_commands():
     
     net_keys = {net0: 0xAA00, net1: 0xBB00}
     
-    vertex_source_nets = {
+    vertices_source_nets = {
         vertex0: [net0, net1],
         vertex1: [],
         vertex2: [],
         vertex3: [],
     }
-    vertex_sink_nets = {
+    vertices_sink_nets = {
         vertex0: [],
         vertex1: [net0],
         vertex2: [net0],
@@ -524,18 +553,18 @@ def test_construct_vertex_commands():
     vertex_commands = {
         vertex: e._construct_vertex_commands(
             vertex=vertex,
-            source_nets=vertex_source_nets[vertex],
-            sink_nets=vertex_sink_nets[vertex],
+            source_nets=vertices_source_nets[vertex],
+            sink_nets=vertices_sink_nets[vertex],
             net_keys=net_keys,
-            records=set(["sent"])).pack()
+            records=[Counters.sent]).pack()
         for vertex in vertices
     }
     
     # Make sure all vertices have the right number of sources/sinks set
     for vertex in vertices:
         commands = vertex_commands[vertex]
-        num_sources = len(vertex_source_nets[vertex])
-        num_sinks = len(vertex_sink_nets[vertex])
+        num_sources = len(vertices_source_nets[vertex])
+        num_sinks = len(vertices_sink_nets[vertex])
         ref_cmd = struct.pack("<II", NT_CMD.NUM,
                               (num_sources | num_sinks << 8))
         assert ref_cmd in commands
@@ -543,8 +572,8 @@ def test_construct_vertex_commands():
     # Make sure all vertices have the right set of sources and sinks
     for vertex in vertices:
         commands = vertex_commands[vertex]
-        sources = vertex_source_nets[vertex]
-        sinks = vertex_sink_nets[vertex]
+        sources = vertices_source_nets[vertex]
+        sinks = vertices_sink_nets[vertex]
         
         for source_num, source_net in enumerate(sources):
             ref_cmd = struct.pack("<II", NT_CMD.SOURCE_KEY | (source_num << 8),
@@ -587,7 +616,7 @@ def test_add_router_recording_vertices():
         placements, allocations, routes) =\
             e._add_router_recording_vertices()
     assert vertices == [vertex0, vertex1]
-    assert router_recording_vertices == {}
+    assert router_recording_vertices == set()
     assert placements == {vertex0: (0, 0), vertex1: (0, 0)}
     
     # If recording any router registers, a vertex must be allocated on every
@@ -605,46 +634,59 @@ def test_add_router_recording_vertices():
     assert vertex1 in vertices
     
     # There should be a router recording vertex on each chip
-    assert set(router_recording_vertices) == set(machine)
+    assert sorted(placements[v] for v in router_recording_vertices) == \
+        sorted(machine)
     
     # The vertex used on (0, 0) should be one we put there, not a new vertex
-    assert router_recording_vertices[(0, 0)] in [vertex0, vertex1]
+    assert (vertex0 in router_recording_vertices) ^ \
+        (vertex1 in router_recording_vertices)
 
 
 def test_get_vertex_record_lookup():
     # Make sure this internal utility produces appropriate results.
-    mock_mc = Mock()
-    e = Experiment(mock_mc)
+    e = Experiment(Mock())
     
     # Two vertices, one will eventually record router values, the other will
     # not.
     vertex0 = e.new_vertex()
     vertex1 = e.new_vertex()
     vertices = [vertex0, vertex1]
+    placements = {vertex0: (0, 0), vertex1: (0, 0)}
+    
+    # Two nets, one connected loop-back, one connected to the other vertex.
+    net0 = e.new_net(vertex0, vertex0)
+    net1 = e.new_net(vertex0, vertex1)
+    vertices_source_nets = {vertex0: [net0, net1], vertex1: []}
+    vertices_sink_nets = {vertex0: [net0], vertex1: [net1]}
     
     # If nothing is being recorded, the sets should be empty.
-    vertices_records = e._get_vertex_record_lookup(vertices, {})
+    vertices_records = e._get_vertex_record_lookup(
+        vertices, set(), placements, vertices_source_nets, vertices_sink_nets)
     assert vertices_records == {
-        vertex0: set([]),
-        vertex1: set([]),
+        vertex0: [],
+        vertex1: [],
     }
     
     # If only vertex counters are being used, they should be included
     e.record_sent = True
-    e.record_blocked = True
-    vertices_records = e._get_vertex_record_lookup(vertices, {})
+    e.record_received = True
+    vertices_records = e._get_vertex_record_lookup(
+        vertices, set(), placements, vertices_source_nets, vertices_sink_nets)
     assert vertices_records == {
-        vertex0: set(["sent", "blocked"]),
-        vertex1: set(["sent", "blocked"]),
+        vertex0: [(net0, Counters.sent), (net1, Counters.sent),
+                  (net0, Counters.received)],
+        vertex1: [(net1, Counters.received)],
     }
     
     # If any routing table entries are present, they should be added to
     # anything in the router_recording_vertices lookup.
-    router_recording_vertices = {(0, 0): vertex0}
+    router_recording_vertices = set([vertex0])
     e.record_external_multicast = True
     vertices_records = e._get_vertex_record_lookup(
-        vertices, router_recording_vertices)
+        vertices, router_recording_vertices, placements, vertices_source_nets, vertices_sink_nets)
     assert vertices_records == {
-        vertex0: set(["sent", "blocked", "external_multicast"]),
-        vertex1: set(["sent", "blocked"]),
+        vertex0: [((0, 0), Counters.external_multicast),
+                  (net0, Counters.sent), (net1, Counters.sent),
+                  (net0, Counters.received)],
+        vertex1: [(net1, Counters.received)],
     }

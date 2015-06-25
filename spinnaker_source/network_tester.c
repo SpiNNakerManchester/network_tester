@@ -15,10 +15,10 @@
 #define US_TO_TICKS(us) ((us) * ((uint32_t)sv->cpu_clk))
 #define NS_TO_TICKS(ns) (((ns) * ((uint32_t)sv->cpu_clk)) / 1000u)
 
-// A (sticky) flag which is set to true if something has gone wrong. This
-// flag's value should be reported back to the host in whatever manner is
-// convenient.
-static bool error_occurred = false;
+// A (sticky) set of flags which are set to NT_ERR_* if something has gone
+// wrong. This flag's value should be reported back to the host as the first
+// word of the result data.
+static uint32_t error_occurred = 0;
 
 // A bit field which indicates what set of fields is to be recorded.
 // Bits 15:0 enable logging of each router diagnostic counter.
@@ -102,9 +102,9 @@ void *sark_tag_ptr (uint tag, uint app_id)
 void set_num_sources(size_t new_num_sources) {
 	// Allocate a new array of sources
 	source_t *new_sources = sark_alloc(new_num_sources, sizeof(source_t));
-	if (!new_sources) {
+	if (!new_sources && new_num_sources != 0) {
 		ERROR("Could not allocate space for %d sources.\n", new_num_sources);
-		error_occurred = true;
+		error_occurred |= NT_ERR_MALLOC;
 		return;
 	}
 	
@@ -113,7 +113,7 @@ void set_num_sources(size_t new_num_sources) {
 		MAX_NUM_RESULTS(new_num_sources, num_sinks), sizeof(uint32_t));
 	if (!new_last_recorded) {
 		ERROR("Could not allocate space for %d sources.\n", new_num_sources);
-		error_occurred = true;
+		error_occurred |= NT_ERR_MALLOC;
 		sark_free(new_sources);
 		return;
 	}
@@ -121,7 +121,7 @@ void set_num_sources(size_t new_num_sources) {
 		MAX_NUM_RESULTS(new_num_sources, num_sinks), sizeof(uint32_t));
 	if (!new_recorded_value_buffer) {
 		ERROR("Could not allocate space for %d sources.\n", new_num_sources);
-		error_occurred = true;
+		error_occurred |= NT_ERR_MALLOC;
 		sark_free(new_sources);
 		sark_free(new_last_recorded);
 		return;
@@ -129,6 +129,7 @@ void set_num_sources(size_t new_num_sources) {
 	
 	// Set default values
 	for (int i = 0; i < new_num_sources; i++) {
+		new_sources[i].key = 0x00000000;
 		new_sources[i].probability = 0x00000000; // 0%
 		new_sources[i].payload = false;
 		new_sources[i].sent_count = 0;
@@ -157,9 +158,9 @@ void set_num_sources(size_t new_num_sources) {
 void set_num_sinks(size_t new_num_sinks) {
 	// Allocate a new array of sinks
 	sink_t *new_sinks = sark_alloc(new_num_sinks, sizeof(sink_t));
-	if (!new_sinks) {
+	if (!new_sinks && new_num_sinks != 0) {
 		ERROR("Could not allocate space for %d sinks.\n", new_num_sinks);
-		error_occurred = true;
+		error_occurred |= NT_ERR_MALLOC;
 		return;
 	}
 	
@@ -168,7 +169,7 @@ void set_num_sinks(size_t new_num_sinks) {
 		MAX_NUM_RESULTS(num_sources, new_num_sinks), sizeof(uint32_t));
 	if (!new_last_recorded) {
 		ERROR("Could not allocate space for %d sinks.\n", new_num_sinks);
-		error_occurred = true;
+		error_occurred |= NT_ERR_MALLOC;
 		sark_free(new_sinks);
 		return;
 	}
@@ -176,7 +177,7 @@ void set_num_sinks(size_t new_num_sinks) {
 		MAX_NUM_RESULTS(num_sources, new_num_sinks), sizeof(uint32_t));
 	if (!new_recorded_value_buffer) {
 		ERROR("Could not allocate space for %d sinks.\n", new_num_sinks);
-		error_occurred = true;
+		error_occurred |= NT_ERR_MALLOC;
 		sark_free(new_sinks);
 		sark_free(new_last_recorded);
 		return;
@@ -184,6 +185,7 @@ void set_num_sinks(size_t new_num_sinks) {
 	
 	// Set default values
 	for (int i = 0; i < new_num_sinks; i++) {
+		new_sinks[i].key = 0x00000000;
 		new_sinks[i].arrived_count = 0;
 	}
 	
@@ -261,7 +263,7 @@ void record(bool first)
 		if (!spin1_dma_transfer(DMA_WRITE, sdram_next_results, recorded_value_buffer, DMA_WRITE,
 		                        num_results * sizeof(uint32_t))) {
 			ERROR("DMA transfer of %d bytes failed.\n", num_results * sizeof(uint32_t));
-			error_occurred = true;
+			error_occurred |= NT_ERR_DMA;
 		}
 		
 		// Advance the SDRAM pointer to the next free space
@@ -374,14 +376,14 @@ void interpreter_main(uint commands_ptr, uint arg1)
 		
 		switch (command) {
 			default:
-				error_occurred = true;
+				error_occurred |= NT_ERR_UNKNOWN_COMMAND;
 				ERROR("Unrecognised command '0x%02x' at 0x%08x\n", *commands, commands);
 				// Fall through to NT_CMD_EXIT
 			
 			case NT_CMD_EXIT:
 				sdram_block[0] = error_occurred;
-				INFO("network_tester exiting with status %s\n",
-				     error_occurred ? "ERROR" : "OK");
+				INFO("network_tester exiting with %s errors\n",
+				     error_occurred ? "some" : "no");
 				spin1_exit((int)error_occurred);
 				return;
 			
@@ -404,7 +406,7 @@ void interpreter_main(uint commands_ptr, uint arg1)
 			case NT_CMD_RUN:
 				if (run(*(commands++))) {
 					ERROR("Timing deadline(s) missed during run\n");
-					error_occurred = true;
+					error_occurred |= NT_ERR_DEADLINE_MISSED;
 				}
 				break;
 			
@@ -428,7 +430,7 @@ void interpreter_main(uint commands_ptr, uint arg1)
 				} else {
 					commands++;
 					ERROR("Source %d does not exist.\n", num);
-					error_occurred = true;
+					error_occurred |= NT_ERR_BAD_ARGUMENTS;
 				}
 				break;
 			
@@ -446,11 +448,12 @@ void interpreter_main(uint commands_ptr, uint arg1)
 			
 			case NT_CMD_SOURCE_KEY:
 				if (num < num_sources) {
+					DEBUG("Source key %d = 0x%08x\n", num, *commands);
 					sources[num].key = *(commands++);
 				} else {
 					commands++;
 					ERROR("Source %d does not exist.\n", num);
-					error_occurred = true;
+					error_occurred |= NT_ERR_BAD_ARGUMENTS;
 				}
 				break;
 			
@@ -459,7 +462,7 @@ void interpreter_main(uint commands_ptr, uint arg1)
 					sources[num].payload = true;
 				} else {
 					ERROR("Source %d does not exist.\n", num);
-					error_occurred = true;
+					error_occurred |= NT_ERR_BAD_ARGUMENTS;
 				}
 				break;
 			
@@ -468,7 +471,7 @@ void interpreter_main(uint commands_ptr, uint arg1)
 					sources[num].payload = false;
 				} else {
 					ERROR("Source %d does not exist.\n", num);
-					error_occurred = true;
+					error_occurred |= NT_ERR_BAD_ARGUMENTS;
 				}
 				break;
 			
@@ -485,11 +488,12 @@ void interpreter_main(uint commands_ptr, uint arg1)
 			
 			case NT_CMD_SINK_KEY:
 				if (num < num_sinks) {
+					DEBUG("Sink key %d = 0x%08x\n", num, *commands);
 					sinks[num].key = *(commands++);
 				} else {
 					commands++;
 					ERROR("Sink %d does not exist.\n", num);
-					error_occurred = true;
+					error_occurred |= NT_ERR_BAD_ARGUMENTS;
 				}
 				break;
 		}
@@ -548,6 +552,10 @@ void c_main(void)
 	      commands_length, sdram_block + 1);
 	spin1_memcpy(commands, sdram_block + 1, commands_length);
 	INFO("Copied %d bytes of commands from SDRAM...\n", commands_length);
+	
+	// While the experiment set the error result so that if results are read back
+	// prematurely, the error code comes back bad.
+	sdram_block[0] = NT_ERR_STILL_RUNNING;
 	
 	// Start the command interpreter as soon as the API starts
 	spin1_schedule_callback(interpreter_main, (uint)commands, 0, 1);

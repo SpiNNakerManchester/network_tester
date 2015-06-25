@@ -246,3 +246,22 @@ Sets the top 24 bits of the MC packet key expected for the sink number
 indicated by bits 15:8 of the command.
 
 The bottom 8 bits of the key supplied are ignored.
+
+
+Result Format
+-------------
+
+The results of an experiment will be loaded starting at the same address the
+commands were loaded from.
+
+The first 32-bit word is a bit field indicating what errors ocurred during the
+execution of the above commands. If this word is zero, nothing went wrong,
+otherwise the bits which are set indicate what went wrong:
+
+* Bit 0: `NT_ERR_STILL_RUNNING`: Not all commands have been executed yet.
+* Bit 1: `NT_ERR_MALLOC`: Failed to allocate sufficient memory.
+* Bit 2: `NT_ERR_DMA`: A DMA transfer failed.
+* Bit 3: `NT_ERR_UNKNOWN_COMMAND`: An unknown command was encountered.
+* Bit 4: `NT_ERR_BAD_ARGUMENTS`: A command was supplied with bad arguments.
+* Bit 5: `NT_ERR_DEADLINE_MISSED`: A realtime deadline was missed.
+

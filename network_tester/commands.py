@@ -5,9 +5,12 @@ import struct
 
 from functools import wraps
 
+import random
+
 from enum import IntEnum
 
-import random
+from network_tester.counters import Counters
+
 
 class NT_CMD(IntEnum):
     """Network Tester command IDs."""
@@ -34,31 +37,6 @@ class NT_CMD(IntEnum):
     CONSUME = 0x30
     NO_CONSUME = 0x31
     SINK_KEY = 0x32
-
-
-class RecordBits(IntEnum):
-    """The recordable values and their associated bit in NT_CMD_RECORD."""
-    local_multicast = 1 << 0
-    external_multicast = 1 << 1
-    local_p2p = 1 << 2
-    external_p2p = 1 << 3
-    local_nearest_neighbour = 1 << 4
-    external_nearest_neighbour = 1 << 5
-    local_fixed_route = 1 << 6
-    external_fixed_route = 1 << 7
-    dropped_multicast = 1 << 8
-    dropped_p2p = 1 << 9
-    dropped_nearest_neighbour = 1 << 10
-    dropped_fixed_route = 1 << 11
-    counter12 = 1 << 12
-    counter13 = 1 << 13
-    counter14 = 1 << 14
-    counter15 = 1 << 15
-    
-    sent = 1 << 16
-    blocked = 1 << 17
-    
-    received = 1 << 24
 
 
 class Commands(object):
@@ -229,19 +207,17 @@ class Commands(object):
         self._commands.extend([NT_CMD.NUM, num_sources | (num_sinks << 8)])
     
     
-    def record(self, **counters):
+    def record(self, *counters):
         """Set the set of counters to record.
         
-        Any counter name in :py:class:`.RecordBits` may be specified. If a
-        counter is not specified, it is assumed to be disabled.
+        Any counter in :py:class:`.Counters` may be specified. If a counter is
+        not specified, it is assumed to be disabled.
         """
         assert not self._exited
         
         recorded = 0
-        for counter in RecordBits:
-            if counters.pop(counter.name, False):
-                recorded |= counter
-        assert len(counters) == 0
+        for counter in counters:
+            recorded |= counter
         
         # Only set the recording set if it changes
         if recorded != self._currently_recorded:
@@ -253,7 +229,7 @@ class Commands(object):
         """Set the interval between recording values in seconds. If 0, record
         only the counters at the end of the run.
         
-        Any counter name in :py:class:`.RecordBits` may be specified. If a
+        Any counter name in :py:class:`.Counters` may be specified. If a
         counter is not specified, it is assumed to be disabled.
         """
         assert not self._exited

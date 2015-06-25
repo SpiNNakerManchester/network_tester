@@ -23,14 +23,19 @@ from rig.place_and_route.constraints import ReserveResourceConstraint
 
 from network_tester.commands import Commands
 
-from network_tester.results import VertexResults
+from network_tester.results import Results
+
+from network_tester.counters import Counters
+
+from network_tester.errors import NetworkTesterError
 
 
 class Group(object):
     """An experimental group."""
     
-    def __init__(self, experiment):
+    def __init__(self, experiment, name):
         self._experiment = experiment
+        self.name = name
         self.labels = OrderedDict()
     
     
@@ -57,6 +62,10 @@ class Group(object):
     def __exit__(self, exc_type, exc_value, traceback):
         """Completes the definition of this experimental group."""
         self._experiment._cur_group = None
+    
+    
+    def __repr__(self):
+        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
     
     
     @property
@@ -87,8 +96,9 @@ class Vertex(object):
     A vertex represents a single core running a traffic generator/consumer.
     """
     
-    def __init__(self, experiment):
+    def __init__(self, experiment, name):
         self._experiment = experiment
+        self.name = name
     
     
     class _Option(object):
@@ -117,14 +127,18 @@ class Vertex(object):
     use_payload = _Option("use_payload")
     
     consume_packets = _Option("consume_packets")
+    
+    def __repr__(self):
+        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
 
 
 class Net(RigNet):
     """A connection between vertices."""
     
-    def __init__(self, experiment, *args, **kwargs):
+    def __init__(self, experiment, name, *args, **kwargs):
         super(Net, self).__init__(*args, **kwargs)
         self._experiment = experiment
+        self.name = name
     
     
     class _Option(object):
@@ -145,6 +159,10 @@ class Net(RigNet):
     probability = _Option("probability")
     
     use_payload = _Option("use_payload")
+    
+    
+    def __repr__(self):
+        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
 
 
 class Experiment(object):
@@ -209,25 +227,6 @@ class Experiment(object):
             "duration": {(None, None): 1.0},
             "cooldown": {(None, None): 0.1},
             "flush_time": {(None, None): 0.01},
-            "record_local_multicast": False,
-            "record_external_multicast": False,
-            "record_local_p2p": False,
-            "record_external_p2p": False,
-            "record_local_nearest_neighbour": False,
-            "record_external_nearest_neighbour": False,
-            "record_local_fixed_route": False,
-            "record_external_fixed_route": False,
-            "record_dropped_multicast": False,
-            "record_dropped_p2p": False,
-            "record_dropped_nearest_neighbour": False,
-            "record_dropped_fixed_route": False,
-            "record_counter12": False,
-            "record_counter13": False,
-            "record_counter14": False,
-            "record_counter15": False,
-            "record_sent": False,
-            "record_blocked": False,
-            "record_received": False,
             "record_interval": {(None, None): 0.0},
             "probability": {(None, None): 0.0},
             "burst_period": {(None, None): 0.0},
@@ -236,11 +235,22 @@ class Experiment(object):
             "use_payload": {(None, None): False},
             "consume_packets": {(None, None): True},
         }
+        
+        # All counters are global-only options and default to False.
+        for counter in Counters:
+            self._values["record_{}".format(counter.name)] = False
     
     
-    def new_vertex(self):
-        """Return a new traffic generator/consumer vertex."""
-        v = Vertex(self)
+    def new_vertex(self, name=None):
+        """Return a new traffic generator/consumer vertex.
+        
+        Parameters
+        ----------
+        name
+            An arbitrary name to give to the vertex. If not specified, vertices
+            are named automatically with a number.
+        """
+        v = Vertex(self, name if name is not None else len(self._vertices))
         self._vertices.append(v)
         
         # Adding a new vertex invalidates any existing placement solution
@@ -250,8 +260,16 @@ class Experiment(object):
     
     
     def new_net(self, *args, **kwargs):
-        """Return a new net to connect a set of vertices."""
-        n = Net(self, *args, **kwargs)
+        """Return a new net to connect a set of vertices.
+        
+        Parameters
+        ----------
+        name
+            An arbitrary name to give to the net. If not specified, nets are
+            named automatically with a number.
+        """
+        name = kwargs.pop("name", len(self._nets))
+        n = Net(self, name, *args, **kwargs)
         
         # Adding a new net invalidates any routing solution.
         self.routes = None
@@ -260,8 +278,16 @@ class Experiment(object):
         return n
     
     
-    def new_group(self):
-        g = Group(self)
+    def new_group(self, name=None):
+        """Define a new experimental group.
+        
+        Parameters
+        ----------
+        name
+            An arbitrary name to give to the group. If not specified, groups
+            are named automatically with a number.
+        """
+        g = Group(self, name if name is not None else len(self._groups))
         self._groups.append(g)
         return g
     
@@ -276,25 +302,8 @@ class Experiment(object):
     
     def _any_router_registers_recorded(self):
         """Are any router registers being recorded?"""
-        return any(self._get_option_value(option)
-                   for option in [
-                       "record_local_multicast",
-                       "record_external_multicast",
-                       "record_local_p2p",
-                       "record_external_p2p",
-                       "record_local_nearest_neighbour",
-                       "record_external_nearest_neighbour",
-                       "record_local_fixed_route",
-                       "record_external_fixed_route",
-                       "record_dropped_multicast",
-                       "record_dropped_p2p",
-                       "record_dropped_nearest_neighbour",
-                       "record_dropped_fixed_route",
-                       "record_counter12",
-                       "record_counter13",
-                       "record_counter14",
-                       "record_counter15",
-                   ])
+        return any(self._get_option_value("record_{}".format(counter.name))
+                   for counter in Counters if counter.router_counter)
     
     
     @property
@@ -422,7 +431,7 @@ class Experiment(object):
             The nets which are sunk at this vertex.
         net_keys : {:py:class:`.Net`: key, ...}
             A mapping from net to routing key.
-        records : set([counter_name, ...])
+        records : [counter, ...]
             The set of counters this vertex records
         """
         commands = Commands()
@@ -472,7 +481,7 @@ class Experiment(object):
             commands.run(self._get_option_value("warmup", group))
             
             # Run the actual experiment and record results
-            commands.record(**{c: True for c in records})
+            commands.record(*records)
             commands.run(self._get_option_value("duration", group))
             
             # Run without recording (briefly) after the experiment to allow
@@ -502,9 +511,8 @@ class Experiment(object):
             vertices is a list containing all vertices (including any added for
             router-recording purposes).
             
-            router_recording_vertices is a dictionary {(x, y): vertex, ...}
-            giving the vertex on each chip which will be tasked with recording
-            router counters.
+            router_recording_vertices is set of vertices which are responsible
+            for recording router counters on their core.
             
             placements, allocations and routes are updated sets of placements
             accounting for any new router-recording vertices.
@@ -517,9 +525,11 @@ class Experiment(object):
         allocations = self.allocations.copy()
         routes = self.routes.copy()  # Not actually modified at present
         
-        # {(x, y): vertex, ...} giving the vertex whose job it is on each chip
-        # to record router activity.
-        router_recording_vertices = {}
+        router_recording_vertices = set()
+        
+        # The set of chips (x, y) which have a core allocated to recording
+        # router counters.
+        recorded_chips = set()
         
         # If router information is being recorded, a vertex must be assigned on
         # every chip to recording router counters.
@@ -527,18 +537,18 @@ class Experiment(object):
             # Assign the job of recording router values to an arbitrary vertex
             # on every chip which already has vertices on it.
             for vertex, placement in iteritems(self.placements):
-                router_recording_vertices[placement] = vertex
+                if placement not in recorded_chips:
+                    router_recording_vertices.add(vertex)
+                    recorded_chips.add(placement)
             
             # If there are chips without any vertices allocated, new
             # router-recording-only vertices must be added.
             for xy in self.machine:
-                if xy not in router_recording_vertices:
+                if xy not in recorded_chips:
                     # Create a new vertex for recording of router data only.
-                    vertex = Vertex(self)
-                    vertex.record_sent = False
-                    vertex.record_blocked = False
-                    vertex.record_received = False
-                    router_recording_vertices[xy] = vertex
+                    vertex = Vertex(self, "router recorder {}, {}".format(*xy))
+                    router_recording_vertices.add(vertex)
+                    recorded_chips.add(xy)
                     placements[vertex] = xy
                     allocations[vertex] = {Cores: slice(1, 2)}
                     vertices.append(vertex)
@@ -547,52 +557,63 @@ class Experiment(object):
                 placements, allocations, routes)
     
     
-    def _get_vertex_record_lookup(self, vertices, router_recording_vertices):
-        """Generates a lookup from vertex to a set of counter names that vertex
+    def _get_vertex_record_lookup(self, vertices, router_recording_vertices,
+                                  placements,
+                                  vertices_source_nets, vertices_sink_nets):
+        """Generates a lookup from vertex to a list of counters that vertex
         records.
         
         Parameters
         ----------
         vertices : [:py:class:`.Vertex`, ...]
-        router_recording_vertices : {(x, y): :py:class:`.Vertex`, ...}
+        router_recording_vertices : set([:py:class:`.Vertex`, ...])
+        placements : {:py:class:`.Vertex`: (x, y), ...}
+        vertices_source_nets : {:py:class:`.Vertex`: [net, ...], ...}
+        vertices_sink_nets : {:py:class:`.Vertex`: [net, ...], ...}
         
         Returns
         -------
-        vertices_records : {vertex: set([counter_name, ...]), ...}
+        vertices_records : {vertex: [(object, counter), ...], ...}
+            For each vertex, gives an ordered-list of the things recorded by
+            that vertex.
+            
+            For router counters, object will be a tuple (x, y) indicating which
+            chip that counter is responsible for.
+            
+            For non-router counters, object will be the Net associated with the
+            counter.
         """
-        # Get the set of router registers names to be recorded.
-        recorded_router_registers = set([
-            counter for counter in [
-                "local_multicast",
-                "external_multicast",
-                "local_p2p",
-                "external_p2p",
-                "local_nearest_neighbour",
-                "external_nearest_neighbour",
-                "local_fixed_route",
-                "external_fixed_route",
-                "dropped_multicast",
-                "dropped_p2p",
-                "dropped_nearest_neighbour",
-                "dropped_fixed_route",
-                "counter12",
-                "counter13",
-                "counter14",
-                "counter15",
-            ]
-            if self._get_option_value("record_{}".format(counter))
-        ])
-        
         # Get the set of recorded counters for each vertex
-        # {vertex, set([counter_name, ...])}
+        # {vertex, [counter, ...]}
         vertices_records = {}
         for vertex in vertices:
-            records = set([
-                counter for counter in ["sent", "blocked", "received"]
-                if self._get_option_value("record_{}".format(counter))
-            ])
-            if vertex in itervalues(router_recording_vertices):
-                records.update(recorded_router_registers)
+            records = []
+            
+            # Add any router-counters if this vertex is recording them
+            if vertex in router_recording_vertices:
+                xy = placements[vertex]
+                for counter in Counters:
+                    if (counter.router_counter and
+                            self._get_option_value(
+                                "record_{}".format(counter.name))):
+                        records.append((xy, counter))
+            
+            # Add any source counters
+            for counter in Counters:
+                if (counter.source_counter and
+                        self._get_option_value(
+                            "record_{}".format(counter.name))):
+                    for net in vertices_source_nets[vertex]:
+                        records.append((net, counter))
+            
+            # Add any sink counters
+            for counter in Counters:
+                if (counter.sink_counter and
+                        self._get_option_value(
+                            "record_{}".format(counter.name))):
+                    for net in vertices_sink_nets[vertex]:
+                        records.append((net, counter))
+            
             vertices_records[vertex] = records
         
         return vertices_records
@@ -622,34 +643,44 @@ class Experiment(object):
             {vertex: binary for vertex in vertices},
             placements, allocations)
         
-        vertices_records = self._get_vertex_record_lookup(
-            vertices, router_recording_vertices)
-        
         # Get the set of source and sink nets for each vertex. Also sets an
         # explicit ordering of the sources/sinks within each.
         # {vertex: [source_or_sink, ...], ...}
-        vertex_source_nets = {v: [] for v in vertices}
-        vertex_sink_nets = {v: [] for v in vertices}
+        vertices_source_nets = {v: [] for v in vertices}
+        vertices_sink_nets = {v: [] for v in vertices}
         for net in self._nets:
-            vertex_source_nets[net.source].append(net)
+            vertices_source_nets[net.source].append(net)
             for sink in net.sinks:
-                vertex_sink_nets[sink].append(net)
+                vertices_sink_nets[sink].append(net)
+        
+        vertices_records = self._get_vertex_record_lookup(
+            vertices, router_recording_vertices, placements,
+            vertices_source_nets, vertices_sink_nets)
         
         # Fill out the set of commands for each vertex
         vertices_commands = {
             vertex: self._construct_vertex_commands(
                 vertex=vertex,
-                source_nets=vertex_source_nets[vertex],
-                sink_nets=vertex_sink_nets[vertex],
+                source_nets=vertices_source_nets[vertex],
+                sink_nets=vertices_sink_nets[vertex],
                 net_keys=net_keys,
-                records=vertices_records[vertex])
+                records=[cntr for obj, cntr in vertices_records[vertex]])
             for vertex in vertices
         }
         
-        # A Result object for each vertex
-        vertices_results = {
-            vertex: VertexResults(vertices_records[vertex], self._groups)
+        # The data size for the results from each vertex
+        total_num_samples = sum(g.num_samples for g in self._groups)
+        vertices_result_size = {
+            vertex: (
+                # The error flag (one word)
+                1 +
+                # One word per recorded value per sample.
+                (total_num_samples * len(vertices_records[vertex]))
+            ) * 4
             for vertex in vertices}
+        
+        # The raw result data for each vertex.
+        vertices_result_data = {}
         
         # Actually load and run the experiment on the machine.
         with self._mc.application(app_id):
@@ -662,7 +693,7 @@ class Experiment(object):
                     # Size of commands (with length prefix)
                     vertices_commands[vertex].size,
                     # Size of results (plus the flags)
-                    vertices_results[vertex].size,
+                    vertices_result_size[vertex],
                 )
                 x, y = placements[vertex]
                 p = allocations[vertex][Cores].start
@@ -701,11 +732,17 @@ class Experiment(object):
             # Read recorded data back
             for vertex, sdram in iteritems(vertices_sdram):
                 sdram.seek(0)
-                results = vertices_results[vertex]
-                results.unpack(sdram.read(results.size))
+                vertices_result_data[vertex] = \
+                    sdram.read(vertices_result_size[vertex])
         
         # Process read results
-        print(vertices_results)
+        results = Results(self, self._vertices, self._nets, vertices_records,
+                          router_recording_vertices, placements,
+                          vertices_result_data, self._groups)
+        if results.errors:
+            raise NetworkTesterError(results)
+        else:
+            return results
     
     
     def _get_option_value(self, option, group=None, vert_or_net=None):

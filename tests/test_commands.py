@@ -6,6 +6,8 @@ from mock import Mock
 
 from network_tester.commands import NT_CMD, Commands
 
+from network_tester.counters import Counters
+
 
 def test_exited_only_once():
     # Exiting the application should prevent any further commands being added.
@@ -107,26 +109,17 @@ def test_record():
     # Make sure setting recorded counters works
     a = Commands()
     
-    # Should not be able to record non-existant counters
-    with pytest.raises(Exception):
-        a.record(foo=True)
-    
     # Should be able to set nothing to be recorded without a new command being
     # added.
     a.record()
     assert a._commands == []
 
-    # Explicitly setting things to False, likewise, shouldn't produce a command
-    # either
-    a.record(local_multicast=False, sent=False)
-    assert a._commands == []
-
     # Should be able to set multiple things
-    a.record(local_multicast=True, external_multicast=False, sent=True, received=False)
+    a.record(Counters.local_multicast, Counters.sent)
     assert a._commands == [NT_CMD.RECORD, (1 << 0) | (1 << 16)]
 
     # Doing the same again shouldn't add a new command
-    a.record(local_multicast=True, sent=True)
+    a.record(Counters.local_multicast, Counters.sent)
     assert len(a._commands) == 2
 
 
