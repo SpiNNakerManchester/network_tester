@@ -284,7 +284,7 @@ bool run(uint32_t time_left_steps)
 	bool deadline_missed = false;
 	
 	// Tick 0 should occur immediately
-	uint32_t next_timestep_ticks = tc2[TC_COUNT];
+	int32_t next_timestep_ticks = (int32_t)tc2[TC_COUNT];
 	
 	// This value counts down until the next recording should be made.
 	uint32_t record_elapsed_steps = 0;
@@ -295,11 +295,11 @@ bool run(uint32_t time_left_steps)
 	// Generate traffic in a busy loop to maximise timing accuracy
 	while (time_left_steps != 0) {
 		// Wait until a timestep has ellapsed. (Note that tc2 is a down-counter).
-		uint32_t time_ticks = tc2[TC_COUNT];
-		if (time_ticks > next_timestep_ticks)
+		int32_t time_ticks = (int32_t)tc2[TC_COUNT];
+		if (time_ticks - next_timestep_ticks > 0)
 			continue;
-		next_timestep_ticks -= timestep_ticks;
-		if (time_ticks <= next_timestep_ticks)
+		next_timestep_ticks -= (uint32_t)timestep_ticks;
+		if (time_ticks - next_timestep_ticks <= 0)
 			deadline_missed = true;
 		time_left_steps--;
 		
