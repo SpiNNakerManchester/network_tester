@@ -142,13 +142,13 @@ transmission is set to one.
 ### 0x21-0x23: `NT_CMD_BURST_PERIOD`, `NT_CMD_BURST_DUTY`, `NT_CMD_BURST_PHASE`
 
     +------------------+------------------+
-    | 0x22             | period_steps     |
+    | 0x22 | src<<8    | period_steps     |
     +------------------+------------------+
     +------------------+------------------+
-    | 0x23             | duty_steps       |
+    | 0x23 | src<<8    | duty_steps       |
     +------------------+------------------+
     +------------------+------------------+
-    | 0x24             | phase_steps      |
+    | 0x24 | src<<8    | phase_steps      |
     +------------------+------------------+
           1 word             1 word
 

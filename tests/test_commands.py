@@ -196,55 +196,63 @@ def test_burst():
     a = Commands()
     
     a.timestep(1e-9)
-    assert len(a._commands) == 2
+    a.num(2, 0)
+    assert len(a._commands) == 4
     
     # Shouldn't change if leaving it at the default (disabled)
-    a.burst(0.0, 0.0, 0.0)
-    a.burst(0.0, 123.0, None)
-    assert len(a._commands) == 2
+    a.burst(0, 0.0, 0.0, 0.0)
+    a.burst(0, 0.0, 123.0, None)
+    assert len(a._commands) == 4
     
-    # Should change everything when the period changes
-    a.burst(1e-6, 0.1, 0.1)
-    assert len(a._commands) == 8
+    # Should change everything when set
+    a.burst(0, 1e-6, 0.1, 0.1)
+    assert len(a._commands) == 10
     assert a._commands[-6:] == [NT_CMD.BURST_PERIOD, 1000,
                                 NT_CMD.BURST_DUTY, 100,
                                 NT_CMD.BURST_PHASE, 100]
     
     # Should change everything when the period changes
-    a.burst(2e-6, 0.1, 0.1)
-    assert len(a._commands) == 14
+    a.burst(0, 2e-6, 0.1, 0.1)
+    assert len(a._commands) == 16
     assert a._commands[-6:] == [NT_CMD.BURST_PERIOD, 2000,
                                 NT_CMD.BURST_DUTY, 200,
                                 NT_CMD.BURST_PHASE, 200]
     
     # Should change nothing if nothing changes
-    a.burst(2e-6, 0.1, 0.1)
-    assert len(a._commands) == 14
+    a.burst(0, 2e-6, 0.1, 0.1)
+    assert len(a._commands) == 16
     
     # Should just change other parts when only they change
-    a.burst(2e-6, 0.1, 0.5)
-    assert len(a._commands) == 16
+    a.burst(0, 2e-6, 0.1, 0.5)
+    assert len(a._commands) == 18
     assert a._commands[-2:] == [NT_CMD.BURST_PHASE, 1000]
     
-    a.burst(2e-6, 0.2, 0.5)
-    assert len(a._commands) == 18
+    a.burst(0, 2e-6, 0.2, 0.5)
+    assert len(a._commands) == 20
     assert a._commands[-2:] == [NT_CMD.BURST_DUTY, 400]
     
     # Should change everything when timestep changed
     a.timestep(2e-9)
-    assert len(a._commands) == 26
+    assert len(a._commands) == 28
     assert a._commands[-6:] == [NT_CMD.BURST_PERIOD, 1000,
                                 NT_CMD.BURST_DUTY, 200,
                                 NT_CMD.BURST_PHASE, 500]
     
     # Should change phase when randomized
-    a.burst(2e-6, 0.2, None)
-    assert len(a._commands) == 28
-    assert a._commands[-2] == NT_CMD.BURST_PHASE
-    
-    a.burst(2e-6, 0.2, None)
+    a.burst(0, 2e-6, 0.2, None)
     assert len(a._commands) == 30
     assert a._commands[-2] == NT_CMD.BURST_PHASE
+    
+    a.burst(0, 2e-6, 0.2, None)
+    assert len(a._commands) == 32
+    assert a._commands[-2] == NT_CMD.BURST_PHASE
+    
+    # Finally, should work with multiple sources
+    a.burst(1, 1e-6, 0.1, 0.1)
+    assert len(a._commands) == 38
+    assert a._commands[-6:] == [(1 << 8) | NT_CMD.BURST_PERIOD, 500,
+                                (1 << 8) | NT_CMD.BURST_DUTY, 50,
+                                (1 << 8) | NT_CMD.BURST_PHASE, 50]
 
 
 def test_source_key():

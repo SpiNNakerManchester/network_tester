@@ -69,6 +69,11 @@ typedef struct {
 	// will be generated.
 	uint32_t key;
 	
+	// Bursting traffic generation. See diagram in command format spec.
+	uint32_t burst_period_steps;
+	uint32_t burst_duty_steps;
+	uint32_t burst_phase_steps;
+	
 	// Probability of a packet being injection each timestep. Probability is scaled
 	// by (1<<32) with 0xFFFFFFFF being special-cased as "1".
 	uint32_t probability;

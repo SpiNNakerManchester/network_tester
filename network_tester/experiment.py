@@ -126,11 +126,11 @@ class Vertex(object):
     
     seed = _Option("seed")
     
-    probability = _Option("probability")
-    
     burst_period = _Option("burst_period")
     burst_duty = _Option("burst_duty")
     burst_phase = _Option("burst_phase")
+    
+    probability = _Option("probability")
     
     use_payload = _Option("use_payload")
     
@@ -163,6 +163,10 @@ class Net(RigNet):
         def __set__(self, obj, value):
             return obj._experiment._set_option_value(
                 self.option, value, obj._experiment.cur_group, obj)
+    
+    burst_period = _Option("burst_period")
+    burst_duty = _Option("burst_duty")
+    burst_phase = _Option("burst_phase")
     
     probability = _Option("probability")
     
@@ -463,14 +467,12 @@ class Experiment(object):
             commands.timestep(self._get_option_value("timestep", group))
             commands.record_interval(self._get_option_value("record_interval", group))
             
-            # Set vertex parameters for the group
-            commands.burst(
-                self._get_option_value("burst_period", group, vertex),
-                self._get_option_value("burst_duty", group, vertex),
-                self._get_option_value("burst_phase", group, vertex))
-            
-            # Set source parameters for the group
+            # Set per-source parameters for the group
             for source_num, source_net in enumerate(source_nets):
+                commands.burst(source_num,
+                    self._get_option_value("burst_period", group, source_net),
+                    self._get_option_value("burst_duty", group, source_net),
+                    self._get_option_value("burst_phase", group, source_net))
                 commands.probability(
                     source_num,
                     self._get_option_value("probability",
@@ -868,11 +870,11 @@ class Experiment(object):
     
     record_interval = _Option("record_interval")
     
-    probability = _Option("probability")
-    
     burst_period = _Option("burst_period")
     burst_duty = _Option("burst_duty")
     burst_phase = _Option("burst_phase")
+    
+    probability = _Option("probability")
     
     use_payload = _Option("use_payload")
     

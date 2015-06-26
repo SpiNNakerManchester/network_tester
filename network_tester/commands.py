@@ -67,6 +67,11 @@ class Commands(object):
         # What is currently being recorded?
         self._currently_recorded = 0
         
+        # The current burst parameters, one for each source
+        self._current_burst_period = None
+        self._current_burst_duty = None
+        self._current_burst_phase = None
+        
         # A list of probabilities, one for each source.
         self._probability = None
         
@@ -82,11 +87,6 @@ class Commands(object):
         
         # A bool indicating whether packets should be consumed or not
         self._consume = True
-        
-        # The current burst parameters
-        self._current_burst_period = 0.0
-        self._current_burst_duty = 0.0
-        self._current_burst_phase = 0.0
     
     
     @property
@@ -169,12 +169,15 @@ class Commands(object):
             self._current_record_interval = None
             self.record_interval(record_interval)
         
-        burst_period = self._current_burst_period
-        if burst_period != 0.0:
-            self._current_burst_period = -1
-            self.burst(burst_period,
-                       self._current_burst_duty,
-                       self._current_burst_phase)
+        burst_periods = self._current_burst_period
+        if burst_periods is not None:
+            for source_num, burst_period in enumerate(burst_periods):
+                if burst_period != 0.0:
+                    self._current_burst_period[source_num] = -1
+                    self.burst(source_num,
+                               burst_period,
+                               self._current_burst_duty[source_num],
+                               self._current_burst_phase[source_num])
     
     def run(self, duration):
         """Run the generator for a given number of seconds."""
@@ -198,6 +201,9 @@ class Commands(object):
         self._num_sources = num_sources
         self._num_sinks = num_sinks
         
+        self._current_burst_period = [0.0] * num_sources
+        self._current_burst_duty = [0.0] * num_sources
+        self._current_burst_phase = [0.0] * num_sources
         self._probability = [0.0] * num_sources
         self._source_key = [0] * num_sources
         self._payload = [False] * num_sources
@@ -258,11 +264,14 @@ class Commands(object):
             self._commands.extend([NT_CMD.PROBABILITY | (source_num << 8),
                                    probability])
     
-    def burst(self, period, duty, phase=0.0):
+    def burst(self, source_num, period, duty, phase=0.0):
         """Set the bursting behaviour of the generator.
         
         Parameters
         ----------
+        source_num : int
+            The number of the traffic generator whose burst behaviour will be
+            changed.
         period : float
             The number of seconds the bursting cycle period lasts.
         duty : float
@@ -274,41 +283,44 @@ class Commands(object):
         assert not self._exited
         
         # Don't add the commands only when required
-        if self._current_burst_period != period:
-            self._current_burst_period = period
+        if self._current_burst_period[source_num] != period:
+            self._current_burst_period[source_num] = period
             
             # Force recomputation of these values
-            self._current_burst_duty = -1
-            self._current_burst_phase = -1
+            self._current_burst_duty[source_num] = -1
+            self._current_burst_phase[source_num] = -1
             
             # Convert to ticks
             period_ = int(round(period / self._current_timestep))
-            self._commands.extend([NT_CMD.BURST_PERIOD, period_])
+            self._commands.extend([NT_CMD.BURST_PERIOD | (source_num << 8),
+                                   period_])
         
         # No other options are relevant when the period is set to 0 (i.e.
         # disabled)
         if period == 0:
             return
         
-        if self._current_burst_duty != duty:
-            self._current_burst_duty = duty
+        if self._current_burst_duty[source_num] != duty:
+            self._current_burst_duty[source_num] = duty
             
             # Convert to ticks
             duty = int(round((period * duty) / self._current_timestep))
-            self._commands.extend([NT_CMD.BURST_DUTY, duty])
+            self._commands.extend([NT_CMD.BURST_DUTY | (source_num << 8),
+                                   duty])
         
-        if self._current_burst_phase != phase:
+        if self._current_burst_phase[source_num] != phase:
             # Generate a random phase if requested (setting the current value
             # such that it will always be replaced)
             if phase is None:
                 phase = random.random()
-                self._current_burst_phase = -1
+                self._current_burst_phase[source_num] = -1
             else:
-                self._current_burst_phase = phase
+                self._current_burst_phase[source_num] = phase
             
             # Convert to ticks
             phase = int(round((period * phase) / self._current_timestep))
-            self._commands.extend([NT_CMD.BURST_PHASE, phase])
+            self._commands.extend([NT_CMD.BURST_PHASE | (source_num << 8),
+                                   phase])
     
     def source_key(self, source_num, key):
         """Set the top 24-bits of the key for a traffic source."""

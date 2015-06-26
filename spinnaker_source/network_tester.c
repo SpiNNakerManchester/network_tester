@@ -47,11 +47,6 @@ static uint32_t *sdram_block;
 // SDRAM location where the next results should be stored
 static uint32_t *sdram_next_results;
 
-// Bursting traffic generation. See diagram in command format spec.
-static uint32_t burst_period_steps;
-static uint32_t burst_duty_steps;
-static uint32_t burst_phase_steps;
-
 // Details of the set of sources and sinks.
 static size_t num_sources;
 static size_t num_sinks;
@@ -130,6 +125,9 @@ void set_num_sources(size_t new_num_sources) {
 	// Set default values
 	for (int i = 0; i < new_num_sources; i++) {
 		new_sources[i].key = 0x00000000;
+		new_sources[i].burst_period_steps = 0; // Not bursty
+		new_sources[i].burst_duty_steps = 0; // No ticks on
+		new_sources[i].burst_phase_steps = 0; // Default: all aligned
 		new_sources[i].probability = 0x00000000; // 0%
 		new_sources[i].payload = false;
 		new_sources[i].sent_count = 0;
@@ -305,21 +303,21 @@ bool run(uint32_t time_left_steps)
 			deadline_missed = true;
 		time_left_steps--;
 		
-		// Only generate packets when in the correct phase if bursting (or all the
-		// time if not).
-		bool burst;
-		if (burst_period_steps != 0) {
-			burst = burst_phase_steps < burst_duty_steps;
+		for (int i = 0; i < num_sources; i++) {
+			// Only generate packets when in the correct phase if bursting (or all the
+			// time if not).
+			bool burst;
+			if (sources[i].burst_period_steps != 0) {
+				burst = sources[i].burst_phase_steps < sources[i].burst_duty_steps;
+				
+				if (++sources[i].burst_phase_steps >= sources[i].burst_period_steps)
+					sources[i].burst_phase_steps = 0;
+			} else {
+				burst = true;
+			}
 			
-			if (++burst_phase_steps >= burst_period_steps)
-				burst_phase_steps = 0;
-		} else {
-			burst = true;
-		}
-		
-		// Generate packets for each packet source
-		if (burst) {
-			for (int i = 0; i < num_sources; i++) {
+			// Generate packets for each packet source
+			if (burst) {
 				bool generate = (sources[i].probability == 0xFFFFFFFFu)
 				              || (sark_rand() < sources[i].probability);
 				
@@ -435,15 +433,15 @@ void interpreter_main(uint commands_ptr, uint arg1)
 				break;
 			
 			case NT_CMD_BURST_PERIOD:
-				burst_period_steps = *(commands++);
+				sources[num].burst_period_steps = *(commands++);
 				break;
 			
 			case NT_CMD_BURST_DUTY:
-				burst_duty_steps = *(commands++);
+				sources[num].burst_duty_steps = *(commands++);
 				break;
 			
 			case NT_CMD_BURST_PHASE:
-				burst_phase_steps = *(commands++);
+				sources[num].burst_phase_steps = *(commands++);
 				break;
 			
 			case NT_CMD_SOURCE_KEY:
@@ -512,9 +510,6 @@ void c_main(void)
 	to_record = 0x00000000; // Nothing
 	record_interval_steps = 0;
 	timestep_ticks = US_TO_TICKS(100);
-	burst_period_steps = 0; // Not bursty
-	burst_duty_steps = 0; // No ticks on
-	burst_phase_steps = 0; // Default: all aligned
 	
 	// Initially have no sources/sinks
 	num_sources = 0;
