@@ -47,11 +47,11 @@ using [setuptools](https://pypi.python.org/pypi/setuptools) as usual:
 
 ### Running Tests
 
-We use [py.test](http://pytest.org) to test rig,
-[pytest-cov](https://pypi.python.org/pypi/pytest-cov/1.8.1) to generate coverage
-reports and the [flake8](https://pypi.python.org/pypi/flake8) coding standard
-checker. Developers should be careful to test for compliance before pushing
-code.
+We use [py.test](http://pytest.org) to test Network Tester,
+[pytest-cov](https://pypi.python.org/pypi/pytest-cov/1.8.1) to generate
+coverage reports and the [flake8](https://pypi.python.org/pypi/flake8) coding
+standard checker. Developers should be careful to test for compliance before
+pushing code.
 
 The required tools can be installed via pip using:
 
@@ -59,10 +59,14 @@ The required tools can be installed via pip using:
 
 The tests can now be run using:
 
-    py.test
+    py.test tests
+
+Some tests require real SpiNNaker hardware to run. To enable these, supply the
+hostname of a booted SpiNNaker board with at least two working chips.
+
+    py.test tests --spinnaker HOSTNAME
 
 
 To get a test coverage report:
 
-    # Summary (for rig module)
-    py.test --cov network_tester --cov-report html
+    py.test testst --cov tests --cov network_tester --cov-report html
