@@ -199,7 +199,7 @@ def test_option_descriptors():
     
     # Defualts should work
     assert e.seed is None
-    assert e.probability == 0.0
+    assert e.probability == 1.0
     
     # Should be able to set
     e.probability = 0.1
@@ -697,6 +697,7 @@ def test_get_vertex_record_lookup():
 
 
 
+@pytest.mark.parametrize("auto_create_group", [True, False])
 @pytest.mark.parametrize("samples_per_group",
                          [[],  # No groups
                           [1],
@@ -707,7 +708,7 @@ def test_get_vertex_record_lookup():
                                               (True, b"\x20\0\0\0"),
                                              ])
 @pytest.mark.parametrize("record", [True, False])
-def test_run(samples_per_group, num_vertices, num_nets_per_vertex,
+def test_run(auto_create_group, samples_per_group, num_vertices, num_nets_per_vertex,
              error, error_code, record):
     """Make sure that the run command carries out an experiment as would be
     expected."""
@@ -770,10 +771,10 @@ def test_run(samples_per_group, num_vertices, num_nets_per_vertex,
     # The run should fail with an exception when expected.
     if error and num_vertices > 0:
         with pytest.raises(NetworkTesterError) as exc_info:
-            e.run(0x33)
+            e.run(0x33, create_group_if_none_exist=auto_create_group)
         results = exc_info.value.results
     else:
-        results = e.run(0x33)
+        results = e.run(0x33, create_group_if_none_exist=auto_create_group)
     
     # The results should be of the correct type...
     assert isinstance(results, Results)
@@ -800,4 +801,7 @@ def test_run(samples_per_group, num_vertices, num_nets_per_vertex,
         mock_mc.sdram_alloc_as_filelike.assert_any_call(size, x=x, y=0, tag=1)
     
     # The correct number of barriers should have been reached
-    assert len(mock_mc.send_signal.mock_calls) == len(samples_per_group)
+    num_groups = len(samples_per_group)
+    if auto_create_group:
+        num_groups = max(1, num_groups)
+    assert len(mock_mc.send_signal.mock_calls) == num_groups

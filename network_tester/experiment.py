@@ -235,12 +235,12 @@ class Experiment(object):
         self._values = {
             "seed": {(None, None): None},
             "timestep": {(None, None): 0.001},
-            "warmup": {(None, None): 1.0},
+            "warmup": {(None, None): 0.0},
             "duration": {(None, None): 1.0},
-            "cooldown": {(None, None): 0.1},
+            "cooldown": {(None, None): 0.0},
             "flush_time": {(None, None): 0.01},
             "record_interval": {(None, None): 0.0},
-            "probability": {(None, None): 0.0},
+            "probability": {(None, None): 1.0},
             "burst_period": {(None, None): 0.0},
             "burst_duty": {(None, None): 0.0},
             "burst_phase": {(None, None): 0.0},
@@ -640,8 +640,12 @@ class Experiment(object):
         return vertices_records
     
     
-    def run(self, app_id=0x42):
+    def run(self, app_id=0x42, create_group_if_none_exist=True):
         """Run the experiment and return the results."""
+        # Sensible default: Create a single experimental group if none defined.
+        if create_group_if_none_exist and len(self._groups) == 0:
+            self.new_group()
+        
         # Place and route the vertices (if required)
         self.place_and_route()
         
