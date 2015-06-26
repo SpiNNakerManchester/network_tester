@@ -795,7 +795,6 @@ def test_run(samples_per_group, num_vertices, num_nets_per_vertex,
         else:
             result_size = 4  # Just the status value
         size = max(cmds_size, result_size)
-        print(mock_mc.sdram_alloc_as_filelike.mock_calls)
         mock_mc.sdram_alloc_as_filelike.assert_any_call(size, x=x, y=0, tag=1)
     
     # The correct number of barriers should have been reached
