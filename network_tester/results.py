@@ -11,6 +11,8 @@ from numpy.lib.recfunctions import flatten_descr
 
 from network_tester.errors import NT_ERR
 
+from rig.place_and_route.routing_tree import RoutingTree
+
 
 # A little-endian unsigned 32-bit value type
 uint32_le = np.dtype("uint32").newbyteorder("<")
@@ -20,7 +22,8 @@ class Results(object):
     """The results of an experiment."""
     
     def __init__(self, experiment, vertices, nets, vertices_records,
-                 router_recording_vertices, placements, vertices_result_data, groups):
+                 router_recording_vertices, placements, routes,
+                 vertices_result_data, groups):
         """Create a new results container.
         
         Parameters
@@ -45,6 +48,8 @@ class Results(object):
             Gives the set of vertices which recorded router counter values.
         placements : {:py:class:`Vertex`: (x, y), ...}
             The chip position for each vertex.
+        routes : {:py:class:`Net`: :py:class:`rig.place_and_route.routing_tree.RoutingTree`, ...}
+            The route generated for each net.
         vertices_result_data : {:py:class:`Vertex`: bytes, ...}
             The raw result data read back from each vertex.
         groups : [:py:class:`Group`, ...]
@@ -56,6 +61,7 @@ class Results(object):
         self._vertices_records = vertices_records
         self._router_recording_vertices = router_recording_vertices
         self._placements = placements
+        self._routes = routes
         self._vertices_result_data = vertices_result_data
         self._groups = groups
         
@@ -83,7 +89,7 @@ class Results(object):
             self._vertices_results[vertex] = results
         
         # Count the number of samples in the datasets
-        self.num_samples = sum(g.num_samples for g in self._groups)
+        self._num_samples = sum(g.num_samples for g in self._groups)
         
         # A full set of group-defined labels
         labels = []
@@ -93,7 +99,7 @@ class Results(object):
                     labels.append(label)
         
         # Create the standard set of columns
-        self.common = np.zeros((self.num_samples, ),
+        self._common = np.zeros((self._num_samples, ),
                                dtype=[(label, object)
                                       for label in labels] +
                                      [("group", object),
@@ -109,9 +115,9 @@ class Results(object):
             # Populate the columns
             for sample_num in range(group.num_samples):
                 for label in labels:
-                    self.common[row][label] = group.labels.get(label)
-                self.common[row]["group"] = group
-                self.common[row]["time"] = (sample_num + 1) * sample_period
+                    self._common[row][label] = group.labels.get(label)
+                self._common[row]["group"] = group
+                self._common[row]["time"] = (sample_num + 1) * sample_period
                 row += 1
     
     
@@ -130,14 +136,14 @@ class Results(object):
         column_names = [(name, np.uint) if isinstance(name, str) else name
                         for name in column_names]
         
-        a = np.zeros((self.num_samples * rows_per_sample, ),
-                     dtype=list(flatten_descr(self.common.dtype)) +
+        a = np.zeros((self._num_samples * rows_per_sample, ),
+                     dtype=list(flatten_descr(self._common.dtype)) +
                            column_names)
         
         # Copy common columns across
-        for common_column in self.common.dtype.names:
+        for common_column in self._common.dtype.names:
             for row in range(rows_per_sample):
-                a[row::rows_per_sample][common_column] = self.common[common_column]
+                a[row::rows_per_sample][common_column] = self._common[common_column]
         
         return a
     
@@ -202,10 +208,25 @@ class Results(object):
         counts = self._make_result_array([("net", object),
                                           ("fan_out", np.uint),
                                           ("source_vertex", object),
-                                          ("sink_vertex", object)] +
+                                          ("sink_vertex", object),
+                                          ("num_hops", np.uint)] +
                                          [c.name for c in self._recorded
                                           if c.source_counter or c.sink_counter],
                                          rows_per_sample=num_sinks)
+        
+        # Construct a lookup from (net, sink) to number of hops.
+        sink_hops = {}
+        
+        def route_length(net, route, hops_so_far=0):
+            for (direction, child) in route.children:
+                if direction is None:  # pragma: no branch
+                    continue  # pragma: no cover
+                elif direction.is_core:
+                    sink_hops[(net, child)] = hops_so_far
+                elif direction.is_link and isinstance(child, RoutingTree):  # pragma: no branch
+                    route_length(net, child, hops_so_far + 1)
+        for net, route in iteritems(self._routes):
+            route_length(net, route)
         
         pair_num = 0
         for net in self._nets:
@@ -218,6 +239,7 @@ class Results(object):
                 counts[pair_num::num_sinks]["fan_out"] = len(net.sinks)
                 counts[pair_num::num_sinks]["source_vertex"] = source_vertex
                 counts[pair_num::num_sinks]["sink_vertex"] = sink_vertex
+                counts[pair_num::num_sinks]["num_hops"] = sink_hops[(net, sink_vertex)]
                 
                 for source_result_column, (obj, counter) in enumerate(source_records):
                     if obj is net and counter.source_counter:
@@ -263,7 +285,7 @@ class Results(object):
 
 
 def to_csv(data, col_sep=",", row_sep="\n", none="NA",
-           group_as_name=True, vertex_as_name=True, net_as_name=True):
+           objects_as_name=True):
     """Render a Numpy structured array produced by network tester as a CSV
     complete with headings.
     
@@ -277,16 +299,13 @@ def to_csv(data, col_sep=",", row_sep="\n", none="NA",
         The separator between rows in the output. (Default: '\\n')
     none : str
         The string to use to represent :py:class:`None`. (Default: 'NA')
-    group_as_name : bool
-        If true, the group column will be listed with group names rather than
-        the repr() of the :py:class:`Group` object.
-    vertex_as_name : bool
-        If true, the vertex column will be listed with vertex names rather than
-        the repr() of the :py:class:`Vertex` object.
-    net_as_name : bool
-        If true, the net column will be listed with net names rather than
-        the repr() of the :py:class:`Net` object.
+    objects_as_name : bool
+        If True, any Group, Vertex or Net object in the table of results will
+        be represented by its name attribute rather than the str() of the
+        object.
     """
+    from network_tester.experiment import Group, Vertex, Net
+    
     data = data.copy()
     
     out = ""
@@ -295,19 +314,15 @@ def to_csv(data, col_sep=",", row_sep="\n", none="NA",
     columns = data.dtype.names
     out += col_sep.join(columns) + row_sep
 
-    # Replace groups/vertices/nets with their group name if present
-    if "group" in columns and group_as_name:
-        data["group"] = [g.name for g in data["group"]]
-    if vertex_as_name:
-        for vertex_column in ["vertex", "source_vertex", "sink_vertex"]:
-            if vertex_column in columns and vertex_as_name:
-                data[vertex_column ] = [v.name for v in data[vertex_column]]
-    if "net" in columns and net_as_name:
-        data["net"] = [n.name for n in data["net"]]
-
-    # Add all data
+    # Add all data reformatting Nones and certain objects as required
     for row in data:
-        out += col_sep.join(str(value) if value is not None else none
+        out += col_sep.join(none if value is None else
+                            str(value.name) if (objects_as_name and 
+                                                isinstance(value,
+                                                           (Group,
+                                                            Vertex,
+                                                            Net))) else
+                            str(value)
                             for value in row) + row_sep
     
-    return(out)
+    return(out.rstrip())

@@ -4,6 +4,8 @@ import pkg_resources
 
 import time
 
+import logging
+
 from collections import OrderedDict
 
 from six import iteritems, itervalues
@@ -28,6 +30,12 @@ from network_tester.results import Results
 from network_tester.counters import Counters
 
 from network_tester.errors import NetworkTesterError
+
+
+"""
+This logger is used to report the progress of the Experiment.
+"""
+logger = logging.getLogger(__name__)
 
 
 class Group(object):
@@ -309,6 +317,7 @@ class Experiment(object):
     @property
     def machine(self):
         if self._machine is None:
+            logger.info("Getting SpiNNaker machine information...")
             self._machine = self._mc.get_machine()
         return self._machine
     
@@ -391,6 +400,7 @@ class Experiment(object):
         constraints += [ReserveResourceConstraint(Cores, slice(0, 1))]
         
         if self.placements is None:
+            logger.info("Placing vertices...")
             self.placements = place(vertices_resources=vertices_resources,
                                     nets=self._nets,
                                     machine=self.machine,
@@ -400,6 +410,7 @@ class Experiment(object):
             self.routes = None
         
         if self.allocations is None:
+            logger.info("Allocating vertices...")
             self.allocations = allocate(vertices_resources=vertices_resources,
                                         nets=self._nets,
                                         machine=self.machine,
@@ -409,6 +420,7 @@ class Experiment(object):
             self.routes = None
         
         if self.routes is None:
+            logger.info("Routing vertices...")
             self.routes = route(vertices_resources=vertices_resources,
                                 nets=self._nets,
                                 machine=self.machine,
@@ -544,15 +556,21 @@ class Experiment(object):
             
             # If there are chips without any vertices allocated, new
             # router-recording-only vertices must be added.
+            num_extra_vertices = 0
             for xy in self.machine:
                 if xy not in recorded_chips:
                     # Create a new vertex for recording of router data only.
+                    num_extra_vertices += 1
                     vertex = Vertex(self, "router recorder {}, {}".format(*xy))
                     router_recording_vertices.add(vertex)
                     recorded_chips.add(xy)
                     placements[vertex] = xy
                     allocations[vertex] = {Cores: slice(1, 2)}
                     vertices.append(vertex)
+                
+            logger.info(
+                "{} vertices added to record router counters".format(
+                    num_extra_vertices))
         
         return (vertices, router_recording_vertices,
                 placements, allocations, routes)
@@ -688,6 +706,7 @@ class Experiment(object):
             # Allocate SDRAM. This is enough to fit the commands and also any
             # recored results.
             vertices_sdram = {}
+            logger.info("Allocating SDRAM...")
             for vertex in vertices:
                 size = max(
                     # Size of commands (with length prefix)
@@ -701,19 +720,25 @@ class Experiment(object):
                     size, x=x, y=y, tag=p)
             
             # Load each vertex's commands
+            logger.info("Loading {} bytes of commands...".format(
+                sum(c.size for c in itervalues(vertices_commands))))
             for vertex, sdram in iteritems(vertices_sdram):
                 sdram.write(vertices_commands[vertex].pack())
             
             # Load routing tables
+            logger.info("Loading routing tables...")
             self._mc.load_routing_tables(routing_tables)
             
             # Load the application
+            logger.info("Loading application on to {} cores...".format(
+                len(vertices)))
             self._mc.load_application(application_map)
             
             # Run through each experimental group
             next_barrier = "sync0"
-            for group in self._groups:
+            for group_num, group in enumerate(self._groups):
                 # Reach the barrier before the run starts
+                logger.info("Waiting for barrier...")
                 self._mc.wait_for_cores_to_reach_state(
                     next_barrier, len(vertices), timeout=2.0)
                 self._mc.send_signal(next_barrier)
@@ -724,13 +749,22 @@ class Experiment(object):
                 duration = self._get_option_value("duration", group)
                 cooldown = self._get_option_value("cooldown", group)
                 flush_time = self._get_option_value("flush_time", group)
-                time.sleep(warmup + duration + cooldown + flush_time)
+                total_time = warmup + duration + cooldown + flush_time
+                
+                logger.info(
+                    "Running group {} ({} of {}) for {} seconds...".format(
+                        group.name, group_num + 1, len(self._groups),
+                        total_time))
+                time.sleep(total_time)
             
             # Wait for all cores to exit after their final run
+            logger.info("Waiting for barrier...")
             self._mc.wait_for_cores_to_reach_state("exit", len(vertices),
                                                    timeout=2.0)
             
             # Read recorded data back
+            logger.info("Reading back {} bytes of results...".format(
+                sum(itervalues(vertices_result_size))))
             for vertex, sdram in iteritems(vertices_sdram):
                 sdram.seek(0)
                 vertices_result_data[vertex] = \
@@ -738,11 +772,14 @@ class Experiment(object):
         
         # Process read results
         results = Results(self, self._vertices, self._nets, vertices_records,
-                          router_recording_vertices, placements,
+                          router_recording_vertices, placements, routes,
                           vertices_result_data, self._groups)
         if results.errors:
+            logger.error(
+                "Experiment completed with errors: {}".format(results.errors))
             raise NetworkTesterError(results)
         else:
+            logger.info("Experiment completed successfully")
             return results
     
     
