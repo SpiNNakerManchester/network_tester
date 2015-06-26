@@ -723,6 +723,8 @@ def test_run(samples_per_group, num_vertices, num_nets_per_vertex,
     
     mock_mc.get_machine.return_value = machine
     
+    mock_mc.wait_for_cores_to_reach_state.return_value = num_vertices
+    
     def mock_sdram_file_read(size):
         return error_code + b"\0"*(size - 4)
     mock_sdram_file = Mock()
