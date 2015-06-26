@@ -741,8 +741,11 @@ class Experiment(object):
             for group_num, group in enumerate(self._groups):
                 # Reach the barrier before the run starts
                 logger.info("Waiting for barrier...")
-                self._mc.wait_for_cores_to_reach_state(
+                num_at_barrier = self._mc.wait_for_cores_to_reach_state(
                     next_barrier, len(vertices), timeout=2.0)
+                assert num_at_barrier == len(vertices), \
+                    "Not all cores reached the barrier."
+                
                 self._mc.send_signal(next_barrier)
                 next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
                 
@@ -761,8 +764,10 @@ class Experiment(object):
             
             # Wait for all cores to exit after their final run
             logger.info("Waiting for barrier...")
-            self._mc.wait_for_cores_to_reach_state("exit", len(vertices),
-                                                   timeout=2.0)
+            num_at_barrier = self._mc.wait_for_cores_to_reach_state(
+                "exit", len(vertices), timeout=2.0)
+            assert num_at_barrier == len(vertices), \
+                  "Not all cores reached the barrier."
             
             # Read recorded data back
             logger.info("Reading back {} bytes of results...".format(
