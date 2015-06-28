@@ -761,7 +761,7 @@ class Experiment(object):
         # Make a local list of vertices, placements and allocations in the
         # model. This may be extended with extra vertices for recording router
         # counter values.
-        vertices = self._vertices.copy()
+        vertices = self._vertices[:]
         placements = self.placements.copy()
         allocations = self.allocations.copy()
         routes = self.routes.copy()  # Not actually modified at present
