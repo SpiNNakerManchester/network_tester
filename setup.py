@@ -1,17 +1,19 @@
 from setuptools import setup, find_packages
 import sys
 
+with open("network_tester/version.py", "r") as f:
+    exec(f.read())
+
 setup(
     name="network_tester",
-    version="0.0.1-dev",
+    version=__version__,
     packages=find_packages(),
 
     # Metadata for PyPi
     author="Jonathan Heathcote",
-    description="SpiNNaker network experiment generator.",
+    description="SpiNNaker network experiment library.",
     license="GPLv2",
 
     # Requirements
-    install_requires=["six", "rig", "enum34"],
-    tests_require=["pytest>=2.6", "pytest-cov", "mock"],
+    install_requires=["rig", "numpy>1.6", "six", "enum34"],
 )
