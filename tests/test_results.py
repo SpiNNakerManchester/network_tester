@@ -23,6 +23,7 @@ def example_experiment():
     """The experiment used in example_results."""
     return Experiment(Mock())
 
+
 @pytest.fixture
 def example_vertices(example_experiment):
     """The set of vertices used in example_results."""
@@ -33,6 +34,7 @@ def example_vertices(example_experiment):
     v4 = example_experiment.new_vertex(4)
     return (v0, v1, v2, v3, v4)
 
+
 @pytest.fixture
 def example_nets(example_experiment, example_vertices):
     """The set of nets used in example_results."""
@@ -42,23 +44,24 @@ def example_nets(example_experiment, example_vertices):
     n2 = example_experiment.new_net(v2, v2, name=2)
     return (n0, n1, n2)
 
+
 @pytest.fixture
 def example_groups(example_experiment):
     """The set of groups used in example_results."""
     with example_experiment.new_group(name="g0") as g0:
         g0.add_label("foobar", "foo")
         g0.add_label("only_group0", 1234)
-        
+
         example_experiment.duration = 1.0
         example_experiment.record_interval = 0.0  # Just one recording
-    
+
     with example_experiment.new_group(name=1) as g1:
         g1.add_label("foobar", "bar")
         g1.add_label("only_group1", 4321)
-        
+
         example_experiment.duration = 0.2
         example_experiment.record_interval = 0.1
-    
+
     return (g0, g1)
 
 
@@ -72,27 +75,27 @@ def example_results(example_experiment, example_vertices, example_nets,
         |       |
         |       |
         +-------+
-         (0, 1)      
-        
-        
+         (0, 1)
+
+
         +-------+  n0    +-------+
         |  v0---+---+----+->v2-+n|
         |  |n1  |    \   |   ^-+2|
         |  v1   |     ----->v3   |
         +-------+        +-------+
-         (0, 0)           (1, 0)  
-    
+         (0, 0)           (1, 0)
+
     In this system there are five vertices, v0-v4. Vertices 0-3 are nominally
     those inserted as part of the experiment. Vertex 4 is a vertex inserted for
     the purpose of recording router registers on chip (0, 1). This gives
     examples of both router-only vertices and dual-purpose vertices.
-    
+
     Vertices 0, 2 and 4 record the external_p2p and local_p2p counters on their
     local router. All vertices record packets send and packets received by any
     nets at that vertex.
-    
+
     The vertices are named by their number, except for v0 which is named "v0".
-    
+
     There are three nets, n0-n2.
     * Net 0 is sourced by vertex 0 and is sunk by v2 and v3 giving an example
       of a multicast net.
@@ -102,9 +105,9 @@ def example_results(example_experiment, example_vertices, example_nets,
       and also a vertex with multiple sunk nets.
     Vertices 1 and 3 give examples of vertices with no sourced nets. Vertices 0
     and 4 give an example of vertices with no sunk nets.
-    
+
     The nets are named by their number, except for n0 which is named "n0".
-    
+
     There are two experimental groups, group 0 and group 1.
     * Group 0 lasts 1 second and has one recorded sample. It has two labelled
       values: foobar = "foo" and only_group0 = 1234. It has the name "g0"
@@ -114,12 +117,12 @@ def example_results(example_experiment, example_vertices, example_nets,
       = "bar" and only_group1 = 4321. It has the name 1 (an integer). Just to
       make the two distinguishable, every counter will be one count higher in
       the second sample for group one.
-    
+
     In all examples, the traffic through each net will be:
     * Net 0: 20 packets per second.
     * Net 1: 30 packets per second.
     * Net 2: 40 packets per second.
-    
+
     Further, the router counters on each chip will increment as follows:
     * (0, 0) local_p2p 10 packets per second.
     * (0, 0) external_p2p 20 packets per second.
@@ -130,10 +133,10 @@ def example_results(example_experiment, example_vertices, example_nets,
     """
     v0, v1, v2, v3, v4 = example_vertices
     n0, n1, n2 = example_nets
-    
+
     # The last router-recording-only vertex is not listed in the vertex list
     vertices = [v0, v1, v2, v3]
-    
+
     router_recording_vertices = set([v0, v2, v4])
     placements = {v0: (0, 0),
                   v1: (0, 0),
@@ -142,14 +145,14 @@ def example_results(example_experiment, example_vertices, example_nets,
                   v4: (0, 1)}
     routes = {
         n0: RoutingTree((0, 0),
-                         set([(Routes.east,
-                               RoutingTree((1, 0),
-                                           set([(Routes.core_1, v2),
-                                                (Routes.core_2, v3)])))])),
+                        set([(Routes.east,
+                              RoutingTree((1, 0),
+                                          set([(Routes.core_1, v2),
+                                               (Routes.core_2, v3)])))])),
         n1: RoutingTree((0, 0),
-                         set([(Routes.core_2, v1)])),
+                        set([(Routes.core_2, v1)])),
         n2: RoutingTree((1, 0),
-                         set([(Routes.core_1, v2)])),
+                        set([(Routes.core_1, v2)])),
     }
     vertices_records = {v0: [((0, 0), Counters.local_p2p),
                              ((0, 0), Counters.external_p2p),
@@ -164,56 +167,57 @@ def example_results(example_experiment, example_vertices, example_nets,
                         v3: [(n0, Counters.received)],
                         v4: [((0, 1), Counters.local_p2p),
                              ((0, 1), Counters.external_p2p)]}
-    
+
     def pack(*args):
         """Pack a series of result values."""
         return struct.pack("<I{}I".format(len(args)),
                            0x00000000,  # No errors
                            *args)
-    
-    vertices_result_data = {        # lp2p,ep2p,n0src,n1src
-                            v0: pack(10, 20, 20, 30,  # g0s0
-                                     1, 2, 2, 3,  # g1s0
-                                     2, 3, 3, 4),  # g1s1
-                                    # n1snk
-                            v1: pack(30,  # g0s0
-                                     3,  # g1s0
-                                     4),  # g1s1
-                                    # lp2p,ep2p,n2src,n0snk,n2snk
-                            v2: pack(30, 40, 40, 20, 40,  # g0s0
-                                     3, 4, 4, 2, 4,  # g1s0
-                                     4, 5, 5, 3, 5),  # g1s1
-                                    # n0snk
-                            v3: pack(20,  # g0s0
-                                     2,  # g1s0
-                                     3),  # g1s1
-                                    # lp2p,ep2p
-                            v4: pack(50, 60,  # g0s0
-                                     5, 6,  # g1s0
-                                     6, 7),  # g1s1
-                           }
-    
+
+    vertices_result_data = {
+        #         lp2p,ep2p,n0src,n1src
+        v0: pack(10, 20, 20, 30,  # g0s0
+                 1, 2, 2, 3,  # g1s0
+                 2, 3, 3, 4),  # g1s1
+        #         n1snk
+        v1: pack(30,  # g0s0
+                 3,  # g1s0
+                 4),  # g1s1
+        #         lp2p,ep2p,n2src,n0snk,n2snk
+        v2: pack(30, 40, 40, 20, 40,  # g0s0
+                 3, 4, 4, 2, 4,  # g1s0
+                 4, 5, 5, 3, 5),  # g1s1
+        #         n0snk
+        v3: pack(20,  # g0s0
+                 2,  # g1s0
+                 3),  # g1s1
+        #         lp2p,ep2p
+        v4: pack(50, 60,  # g0s0
+                 5, 6,  # g1s0
+                 6, 7),  # g1s1
+    }
+
     r = Results(example_experiment, vertices, example_nets, vertices_records,
                 router_recording_vertices, placements, routes,
                 vertices_result_data, example_groups)
-    
+
     return r
 
 
-@pytest.mark.parametrize("num_vertices,num_nets_per_vertex",
-                         [# Absolutely nothing
-                          (0, 0),
-                          # Nothing to record with various numbers of
-                          # nets/vertices doesn't do anything
-                          (1, 0),
-                          (1, 1),
-                          (2, 2),
-                         ])
+@pytest.mark.parametrize("num_vertices,num_nets_per_vertex", [
+    # Absolutely nothing
+    (0, 0),
+    # Nothing to record with various numbers of
+    # nets/vertices doesn't do anything
+    (1, 0),
+    (1, 1),
+    (2, 2),
+])
 def test_empty(num_vertices, num_nets_per_vertex):
     """Test that we can produce a Result object for various scenarios where no
     results will exist."""
     experiment = Experiment(Mock())
-    
+
     vertices = [experiment.new_vertex() for _ in range(num_vertices)]
     nets = [experiment.new_net(v, v)
             for v in vertices
@@ -227,13 +231,13 @@ def test_empty(num_vertices, num_nets_per_vertex):
     vertices_result_data = {v: b"\0\0\0\0" for v in vertices}
     groups = {}
     vertices_records = {v: [] for v in vertices}
-    
+
     r = Results(experiment, vertices, nets, vertices_records,
                 router_recording_vertices, placements, routes,
                 vertices_result_data, groups)
-    
+
     assert r.errors == set()
-    
+
     assert len(r.totals()) == 0
     assert len(r.vertex_totals()) == 0
     assert len(r.net_totals()) == 0
@@ -241,25 +245,24 @@ def test_empty(num_vertices, num_nets_per_vertex):
     assert len(r.router_counters()) == 0
 
 
-@pytest.mark.parametrize("vertices_result_data,expected_errors",
-                         [
-                          # No errors
-                          ([], set()),
-                          ([b"\0\0\0\0"], set()),
-                          ([b"\0\0\0\0", b"\0\0\0\0"], set()),
-                          # Non-overlapping errors should get merged
-                          ([b"\x01\0\0\0"], set([NT_ERR.STILL_RUNNING])),
-                          ([b"\x01\0\0\0", b"\x02\0\0\0"],
-                           set([NT_ERR.STILL_RUNNING, NT_ERR.MALLOC])),
-                          # Overlapping errors should also get merged
-                          ([b"\x01\0\0\0", b"\x01\0\0\0"],
-                           set([NT_ERR.STILL_RUNNING])),
-                         ])
+@pytest.mark.parametrize("vertices_result_data,expected_errors", [
+    # No errors
+    ([], set()),
+    ([b"\0\0\0\0"], set()),
+    ([b"\0\0\0\0", b"\0\0\0\0"], set()),
+    # Non-overlapping errors should get merged
+    ([b"\x01\0\0\0"], set([NT_ERR.STILL_RUNNING])),
+    ([b"\x01\0\0\0", b"\x02\0\0\0"],
+     set([NT_ERR.STILL_RUNNING, NT_ERR.MALLOC])),
+    # Overlapping errors should also get merged
+    ([b"\x01\0\0\0", b"\x01\0\0\0"],
+     set([NT_ERR.STILL_RUNNING])),
+])
 def test_errors(vertices_result_data, expected_errors):
     """Test that we can produce a Result object for various scenarios where no
     results will exist."""
     experiment = Experiment(Mock())
-    
+
     vertices_result_data = {experiment.new_vertex(): d
                             for d in vertices_result_data}
     vertices = list(vertices_result_data)
@@ -269,13 +272,13 @@ def test_errors(vertices_result_data, expected_errors):
     routes = {}
     groups = {}
     vertices_records = {v: [] for v in vertices}
-    
+
     r = Results(experiment, vertices, nets, vertices_records,
                 router_recording_vertices, placements, routes,
                 vertices_result_data, groups)
-    
+
     assert r.errors == expected_errors
-    
+
     if expected_errors:
         assert "error" in repr(r)
     else:
@@ -299,27 +302,27 @@ def test_vertices_results(example_results, example_vertices):
     """Make sure the results are unpacked correctly."""
     v0, v1, v2, v3, v4 = example_vertices
     model_vertices_results = {
-                    # lp2p,ep2p,n0src,n1src
+        #             lp2p,ep2p,n0src,n1src
         v0: np.array([[10, 20, 20, 30],  # g0s0
                       [1, 2, 2, 3],  # g1s0
                       [2, 3, 3, 4]],  # g1s1
-                      dtype=np.uint),
-                    # n1snk
+                     dtype=np.uint),
+        #             n1snk
         v1: np.array([[30],  # g0s0
                       [3],  # g1s0
                       [4]],  # g1s1
                      dtype=np.uint),
-                    # lp2p,ep2p,n2src,n0snk,n2snk
+        #             lp2p,ep2p,n2src,n0snk,n2snk
         v2: np.array([[30, 40, 40, 20, 40],  # g0s0
                       [3, 4, 4, 2, 4],  # g1s0
                       [4, 5, 5, 3, 5]],  # g1s1
                      dtype=np.uint),
-                    # n0snk
+        #             n0snk
         v3: np.array([[20],  # g0s0
                       [2],  # g1s0
                       [3]],  # g1s1
                      dtype=np.uint),
-                    # lp2p,ep2p
+        #             lp2p,ep2p
         v4: np.array([[50, 60],  # g0s0
                       [5, 6],  # g1s0
                       [6, 7]],  # g1s1
@@ -329,41 +332,44 @@ def test_vertices_results(example_results, example_vertices):
         assert (example_results._vertices_results[vertex] ==
                 model_vertices_results[vertex]).all()
 
+
 def test_make_result_array(example_results, example_groups):
     """Make sure the common set of columns are correct."""
     g0, g1 = example_groups
-    
+
     # Just the basic columns
     a = example_results._make_result_array([])
     assert a.dtype.names == ("foobar",
-                             "only_group0", 
-                             "only_group1", 
+                             "only_group0",
+                             "only_group1",
                              "group",
                              "time")
     assert (a["foobar"] == np.array(["foo", "bar", "bar"], dtype=object)).all()
-    assert (a["only_group0"] == np.array([1234, None, None], dtype=object)).all()
-    assert (a["only_group1"] == np.array([None, 4321, 4321], dtype=object)).all()
+    assert (a["only_group0"] == np.array([1234, None, None],
+                                         dtype=object)).all()
+    assert (a["only_group1"] == np.array([None, 4321, 4321],
+                                         dtype=object)).all()
     assert (a["group"] == np.array([g0, g1, g1], dtype=object)).all()
     assert (a["time"] == np.array([1.0, 0.1, 0.2], dtype=np.double)).all()
-    
+
     # Adding additional columns should work
     a = example_results._make_result_array(["magic", ("moose", np.double)])
     assert a.dtype.names == ("foobar",
-                             "only_group0", 
-                             "only_group1", 
+                             "only_group0",
+                             "only_group1",
                              "group",
                              "time",
                              "magic",
                              "moose")
     assert (a["magic"] == np.array([0, 0, 0], dtype=np.uint)).all()
     assert (a["moose"] == np.array([0.0, 0.0, 0.0], dtype=np.double)).all()
-    
+
     # Having multiple rows per sample should work too
     a = example_results._make_result_array(["magic", ("moose", np.double)],
                                            rows_per_sample=2)
     assert a.dtype.names == ("foobar",
-                             "only_group0", 
-                             "only_group1", 
+                             "only_group0",
+                             "only_group1",
                              "group",
                              "time",
                              "magic",
@@ -374,7 +380,8 @@ def test_make_result_array(example_results, example_groups):
                                          dtype=object)).all()
     assert (a["only_group1"] == np.array([None, None, 4321, 4321, 4321, 4321],
                                          dtype=object)).all()
-    assert (a["group"] == np.array([g0, g0, g1, g1, g1, g1], dtype=object)).all()
+    assert (a["group"] == np.array([g0, g0, g1, g1, g1, g1],
+                                   dtype=object)).all()
     assert (a["time"] == np.array([1.0, 1.0, 0.1, 0.1, 0.2, 0.2],
                                   dtype=np.double)).all()
     assert (a["magic"] == np.array([0, 0, 0, 0, 0, 0],
@@ -387,10 +394,10 @@ def test_totals(example_results, example_groups):
     """Make sure the overall totals work."""
     g0, g1 = example_groups
     totals = example_results.totals()
-    
+
     assert totals.dtype.names == ("foobar",
-                                  "only_group0", 
-                                  "only_group1", 
+                                  "only_group0",
+                                  "only_group1",
                                   "group",
                                   "time",
                                   "local_p2p",
@@ -409,10 +416,10 @@ def test_vertex_totals(example_results, example_groups, example_vertices):
     # Note that the router-recording-only-vertex should be omitted
     v0, v1, v2, v3 = example_vertices[:4]
     totals = example_results.vertex_totals()
-    
+
     assert totals.dtype.names == ("foobar",
-                                  "only_group0", 
-                                  "only_group1", 
+                                  "only_group0",
+                                  "only_group1",
                                   "group",
                                   "time",
                                   "vertex",
@@ -438,10 +445,10 @@ def test_net_totals(example_results, example_groups, example_nets):
     g0, g1 = example_groups
     n0, n1, n2 = example_nets
     totals = example_results.net_totals()
-    
+
     assert totals.dtype.names == ("foobar",
-                                  "only_group0", 
-                                  "only_group1", 
+                                  "only_group0",
+                                  "only_group1",
                                   "group",
                                   "time",
                                   "net",
@@ -461,17 +468,17 @@ def test_net_totals(example_results, example_groups, example_nets):
 
 
 def test_net_counters(example_results, example_groups, example_vertices,
-                    example_nets):
+                      example_nets):
     """Make sure the all sources/sinks counters work."""
     g0, g1 = example_groups
     # Note that the router-recording-only-vertex should be omitted
     v0, v1, v2, v3 = example_vertices[:4]
     n0, n1, n2 = example_nets
     counts = example_results.net_counters()
-    
+
     assert counts.dtype.names == ("foobar",
-                                  "only_group0", 
-                                  "only_group1", 
+                                  "only_group0",
+                                  "only_group1",
                                   "group",
                                   "time",
                                   "net",
@@ -501,10 +508,10 @@ def test_router_counters(example_results, example_groups):
     """Make sure the all router counters work."""
     g0, g1 = example_groups
     counts = example_results.router_counters()
-    
+
     assert counts.dtype.names == ("foobar",
-                                  "only_group0", 
-                                  "only_group1", 
+                                  "only_group0",
+                                  "only_group1",
                                   "group",
                                   "time",
                                   "x",
@@ -527,7 +534,7 @@ def test_router_counters(example_results, example_groups):
 def test_to_csv():
     """Make sure the CSV conversion utility actually works..."""
     dt = np.dtype([("a", np.uint), ("b", np.double), ("c", object)])
-    
+
     e = Experiment(Mock())
     g0 = e.new_group("g0")
     g1 = e.new_group(1)
@@ -535,22 +542,22 @@ def test_to_csv():
     v1 = e.new_vertex(1)
     n0 = e.new_net(v0, v0, name="n0")
     n1 = e.new_net(v1, v1, name=1)
-    
+
     # Empty dataset
     assert to_csv(np.zeros((0,), dtype=dt)) == "a,b,c"
-    
+
     # Standard data types should be handled correctly
     a = np.zeros((2,), dtype=dt)
     assert to_csv(a) == ("a,b,c\n"
                          "0,0.0,0\n"
                          "0,0.0,0")
-    
+
     # Nones should be printed specially
     a["c"][0] = None
     assert to_csv(a) == ("a,b,c\n"
                          "0,0.0,NA\n"
                          "0,0.0,0")
-    
+
     # Groups, Nets and Vertices should be printed specially
     a = np.zeros((6,), dtype=dt)
     a["c"][0] = g0

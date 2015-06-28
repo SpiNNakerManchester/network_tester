@@ -21,7 +21,7 @@ def test_counters_classes():
                            Counters.counter15])
     source_counters = set([Counters.sent, Counters.blocked])
     sink_counters = set([Counters.received])
-    
+
     for counter in Counters:
         if counter in router_counters:
             assert counter.router_counter

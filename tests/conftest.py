@@ -1,5 +1,6 @@
 import pytest
 
+
 @pytest.fixture(scope='session')
 def spinnaker_ip(request):
     return request.config.getoption('spinnaker', skip=True)[0]

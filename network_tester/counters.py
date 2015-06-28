@@ -5,11 +5,11 @@ from enum import IntEnum
 
 class Counters(IntEnum):
     """The list of recordable values.
-    
+
     Each counter's numerical value is equal to the corresponding bit in the
     NT_CMD_RECORD command.
     """
-    
+
     # Router counters
     local_multicast = 1 << 0
     external_multicast = 1 << 1
@@ -27,28 +27,25 @@ class Counters(IntEnum):
     counter13 = 1 << 13
     counter14 = 1 << 14
     counter15 = 1 << 15
-    
+
     # Source counters
     sent = 1 << 16
     blocked = 1 << 17
-    
+
     # Sink counters
     received = 1 << 24
-    
+
     @property
     def router_counter(self):
         """True if a router counter."""
         return self <= (1 << 15)
-    
+
     @property
     def source_counter(self):
         """True if a source counter."""
         return (1 << 16) <= self <= (1 << 23)
-    
+
     @property
     def sink_counter(self):
         """True if a sink counter."""
         return (1 << 24) <= self <= (1 << 31)
-
-
-
