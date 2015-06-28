@@ -7,7 +7,7 @@ install:
         - python setup.py develop
         - pip install -r requirements-test.txt
         - pip install python-coveralls
-script: py.test tests --cov tests --cov network_tester --durations=10
+script: py.test tests --cov network_tester --durations=10
 after_success:
         - coveralls
 notifications:
