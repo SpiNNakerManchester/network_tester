@@ -312,14 +312,14 @@ def test_non_nestable_groups():
     e = Experiment(Mock())
     
     with e.new_group() as group0:
-        assert e.cur_group is group0
+        assert e._cur_group is group0
         
         with pytest.raises(Exception):
             with e.new_group():
                 pass  # pragma: no cover
         
         # Group should not have been changed
-        assert e.cur_group is group0
+        assert e._cur_group is group0
 
 
 def test_group_labels():

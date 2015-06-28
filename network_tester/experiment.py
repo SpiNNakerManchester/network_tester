@@ -38,158 +38,51 @@ This logger is used to report the progress of the Experiment.
 logger = logging.getLogger(__name__)
 
 
-class Group(object):
-    """An experimental group."""
+class Experiment(object):
+    """Defines a network experiment to be run on a SpiNNaker machine.
     
-    def __init__(self, experiment, name):
-        self._experiment = experiment
-        self.name = name
-        self.labels = OrderedDict()
+    An experiment consists of a fixed set of 'vertices'
+    (:py:meth:`.new_vertex`) connected together by 'nets'
+    (:py:meth:`.new_net`). Vertices correspond with SpiNNaker application cores
+    running artificial traffic generators and the nets correspond with traffic
+    flows between cores.
     
+    An experiment is broken up into 'groups' (:py:meth:`.new_group`), during
+    which the traffic generators produce packets according to a specified
+    traffic pattern. Within each group, metrics, such as packet counts, may be
+    recorded. Though the placement of vertices and the routing of nets is
+    fixed throughout an experiment, the rate and pattern with which which
+    packets are produced can be varied between groups allowing, for example,
+    different traffic patterns to be tested.
     
-    def add_label(self, name, value):
-        """Set the value of a label column for this group.
+    When the experiment is :py:meth:`.run`, appropriately-configured traffic
+    generator applications will be loaded onto SpiNNaker and, after the
+    experiment completes, the results are read back ready for analysis.
+    """
+    
+    def __init__(self, hostname_or_machine_controller):
+        """Create a new network experiment on a particular SpiNNaker machine.
+        
+        Example usage::
+        
+            >>> import sys
+            >>> from network_tester import Experiment
+            >>> e = Experiment(sys.argv[1])  # Takes hostname as a CLI argument
+        
+        The experimental parameters can be set by setting attributes of the
+        :py:class:`Experiment` instance like so::
+        
+            >>> e = Experiment(...)
+            >>> # Set the probability of a packet being generated at the source
+            >>> # of each net every timestep
+            >>> e.probability = 1.0
         
         Parameters
         ----------
-        name : str
-            The name of the column
-        value
-            The value in the column for results in this group.
-        """
-        self.labels[name] = value
-    
-    
-    def __enter__(self):
-        """Define parameters for this experimental group."""
-        if self._experiment._cur_group is not None:
-            raise Exception("Cannot nest experimental groups.")
-        self._experiment._cur_group = self
-        return self
-    
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Completes the definition of this experimental group."""
-        self._experiment._cur_group = None
-    
-    
-    def __repr__(self):
-        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
-    
-    
-    @property
-    def num_samples(self):
-        """Returns the number of recorded samples which will be made during
-        the running of this group.
-        
-        Note that this is in terms of *samples* and not in terms of the total
-        number of counter values recorded since the values recorded varies from
-        vertex to vertex.
-        """
-        duration = self._experiment._get_option_value("duration", self)
-        timestep = self._experiment._get_option_value("timestep", self)
-        record_interval = self._experiment._get_option_value("record_interval", self)
-        
-        run_steps = int(round(duration / timestep))
-        interval_steps = int(round(record_interval / timestep))
-        
-        if interval_steps == 0:
-            return 1
-        else:
-            return run_steps // interval_steps
-
-
-class Vertex(object):
-    """A vertex in the experiment.
-    
-    A vertex represents a single core running a traffic generator/consumer.
-    """
-    
-    def __init__(self, experiment, name):
-        self._experiment = experiment
-        self.name = name
-    
-    
-    class _Option(object):
-        """A descriptor which provides access to the experiment's _values
-        dictionary."""
-        
-        def __init__(self, option):
-            self.option = option
-        
-        def __get__(self, obj, type=None):
-            return obj._experiment._get_option_value(
-                self.option, obj._experiment.cur_group, obj)
-        
-        def __set__(self, obj, value):
-            return obj._experiment._set_option_value(
-                self.option, value, obj._experiment.cur_group, obj)
-    
-    seed = _Option("seed")
-    
-    burst_period = _Option("burst_period")
-    burst_duty = _Option("burst_duty")
-    burst_phase = _Option("burst_phase")
-    
-    probability = _Option("probability")
-    
-    use_payload = _Option("use_payload")
-    
-    consume_packets = _Option("consume_packets")
-    
-    def __repr__(self):
-        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
-
-
-class Net(RigNet):
-    """A connection between vertices."""
-    
-    def __init__(self, experiment, name, *args, **kwargs):
-        super(Net, self).__init__(*args, **kwargs)
-        self._experiment = experiment
-        self.name = name
-    
-    
-    class _Option(object):
-        """A descriptor which provides access to the experiment's _values
-        dictionary."""
-        
-        def __init__(self, option):
-            self.option = option
-        
-        def __get__(self, obj, type=None):
-            return obj._experiment._get_option_value(
-                self.option, obj._experiment.cur_group, obj)
-        
-        def __set__(self, obj, value):
-            return obj._experiment._set_option_value(
-                self.option, value, obj._experiment.cur_group, obj)
-    
-    burst_period = _Option("burst_period")
-    burst_duty = _Option("burst_duty")
-    burst_phase = _Option("burst_phase")
-    
-    probability = _Option("probability")
-    
-    use_payload = _Option("use_payload")
-    
-    
-    def __repr__(self):
-        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
-
-
-class Experiment(object):
-    """A network experiment."""
-    
-    def __init__(self, hostname_or_machine_controller):
-        """Create a network experiment.
-        
-        Paramters
-        ---------
         hostname_or_machine_controller : \
                 str or :py:class:`rig.machine_control.MachineController`
-            The hostname of a SpiNNaker machine or a machine controller
-            connected to an available SpiNNaker machine to use for this
-            experiment.
+            The hostname or :py:class:`~rig.machine_control.MachineController`
+            of a SpiNNaker machine to run the experiment on.
         """
         if isinstance(hostname_or_machine_controller, str):
             self._mc = MachineController(hostname_or_machine_controller)
@@ -207,7 +100,8 @@ class Experiment(object):
         self._allocations = None
         self._routes = None
         
-        # The experimental group currently being defined
+        # The experimental group currently being defined. Set and cleared on
+        # entry and exit of Group context-managers.
         self._cur_group = None
         
         # A list of experimental groups which have been defined
@@ -254,13 +148,36 @@ class Experiment(object):
     
     
     def new_vertex(self, name=None):
-        """Return a new traffic generator/consumer vertex.
+        """Create a new :py:class:`Vertex`.
+        
+        A vertex corresponds with a SpiNNaker application core and can produce
+        or consume SpiNNaker packets.
+        
+        Example::
+        
+            >>> # Create three vertices
+            >>> v0 = e.new_vertex()
+            >>> v1 = e.new_vertex()
+            >>> v2 = e.new_vertex()
+        
+        The experimental parameters for each vertex can also be overridden
+        individually if desired::
+        
+            >>> # Nets sourced at vertex v2 will transmit with 50% probability
+            >>> # each timestep
+            >>> v2.probability = 0.5
         
         Parameters
         ----------
         name
-            An arbitrary name to give to the vertex. If not specified, vertices
-            are named automatically with a number.
+            *Optional.* A name for the vertex. If not specified the vertex will
+            be given a number as its name. This name will be used in results
+            tables.
+        
+        Returns
+        -------
+        :py:class:`Vertex`
+            An object representing the vertex.
         """
         v = Vertex(self, name if name is not None else len(self._vertices))
         self._vertices.append(v)
@@ -271,17 +188,59 @@ class Experiment(object):
         return v
     
     
-    def new_net(self, *args, **kwargs):
-        """Return a new net to connect a set of vertices.
+    def new_net(self, source, sinks, weight=1.0, name=None):
+        """Create a new net.
+        
+        A net represents a flow of SpiNNaker packets from one source vertex to
+        many sink vertices.
+        
+        For example::
+        
+            >>> # A net with v0 as a source and v1 as a sink.
+            >>> n0 = e.new_net(v0, v1)
+            
+            >>> # Another net with v0 as a source and both v1 and v2 as sinks.
+            >>> n1 = e.new_net(v0, [v1, v2])
+        
+        The experimental parameters for each net can also be overridden
+        individually if desired. This will take precedence over any overridden
+        values set for the source vertex of the net.
+        
+        For example::
+        
+            >>> # Net n0 will generate a packet in 80% of timesteps
+            >>> n0.probability = 0.8
         
         Parameters
         ----------
+        source : :py:class:`Vertex`
+            The source :py:class:`Vertex` of the net. A stream of packets will
+            be generated by this vertex and sent to all sinks.
+            
+            Only :py:class:`Vertex` objects created by this
+            :py:class:`Experiment` may be used.
+        sinks : :py:class:`Vertex` or [:py:class:`Vertex`, ...]
+            The sink :py:class:`Vertex` or list of sink vertices for the net.
+            
+            Only :py:class:`Vertex` objects created by this
+            :py:class:`Experiment` may be used.
+        weight : float
+            *Optional.* A hint for place and route tools indicating the
+            relative amount of traffic that may flow through this net. This
+            number is not used by the traffic generator.
         name
-            An arbitrary name to give to the net. If not specified, nets are
-            named automatically with a number.
+            *Optional.* A name for the net. If not specified the net will be
+            given a number as its name. This name will be used in results
+            tables.
+        
+        Returns
+        -------
+        :py:class:`Net`
+            An object representing the net.
         """
-        name = kwargs.pop("name", len(self._nets))
-        n = Net(self, name, *args, **kwargs)
+        if name is None:
+            name = len(self._nets)
+        n = Net(self, name, source, sinks, weight)
         
         # Adding a new net invalidates any routing solution.
         self.routes = None
@@ -293,69 +252,244 @@ class Experiment(object):
     def new_group(self, name=None):
         """Define a new experimental group.
         
+        The experiment can be divided up into groups where the traffic pattern
+        generated (but not the structure of connectivity) varies for each
+        group. Results are recorded separately for each group and the network
+        is drained of packets between groups.
+        
+        The returned :py:class:`Group` object can be used as a context manager
+        within which experimental parameters specific to that group may be set,
+        including per-vertex and per-net parameters. Note that parameters set
+        globally for the experiment in particular group do not take precedence
+        over per-vertex or per-net parameter settings.
+        
+        For example::
+        
+            >>> with e.new_group():
+            ...     # Overrides default probability of sending a packet within
+            ...     # the group.
+            ...     e.probability = 0.5
+            ...     # Overrides the probability for v2 within the group
+            ...     v2.probability = 0.25
+            ...     # Overrides the probability for n0 within the group
+            ...     n0.probability = 0.4
+        
         Parameters
         ----------
         name
-            An arbitrary name to give to the group. If not specified, groups
-            are named automatically with a number.
+            *Optional.* A name for the group. If not specified the group will be
+            given a number as its name. This name will be used in results
+            tables.
+        
+        Returns
+        -------
+        :py:class:`Group`
+            An object representing the group.
         """
         g = Group(self, name if name is not None else len(self._groups))
         self._groups.append(g)
         return g
     
     
-    @property
-    def cur_group(self):
-        """Get the unique identifier of the experimental group currently being
-        defined (or None if no group is being defined)."""
+    def run(self, app_id=0x42, create_group_if_none_exist=True):
+        """Run the experiment on SpiNNaker and return the results.
         
-        return self._cur_group
-    
-    
-    def _any_router_registers_recorded(self):
-        """Are any router registers being recorded?"""
-        return any(self._get_option_value("record_{}".format(counter.name))
-                   for counter in Counters if counter.router_counter)
-    
-    
-    @property
-    def machine(self):
-        if self._machine is None:
-            logger.info("Getting SpiNNaker machine information...")
-            self._machine = self._mc.get_machine()
-        return self._machine
-    
-    @machine.setter
-    def machine(self, value):
-        self._machine = value
-    
-    
-    @property
-    def placements(self):
-        return self._placements
-    
-    @placements.setter
-    def placements(self, value):
-        self._placements = value
-        self.allocation = None
-        self.routes = None
-    
-    @property
-    def allocations(self):
-        return self._allocations
-    
-    @allocations.setter
-    def allocations(self, value):
-        self._allocations = value
-        self.routes = None
-    
-    @property
-    def routes(self):
-        return self._routes
-    
-    @routes.setter
-    def routes(self, value):
-        self._routes = value
+        If placements, allocations or routes have not been provided, the
+        vertices and nets will be automatically placed, allocated and routed
+        using the default algorithms in Rig.
+        
+        Following placement, the experimental parameters are loaded onto the
+        machine and each experimental group is executed in turn. Results are
+        recorded by the machine and at the end of the experiment are read back.
+        
+        .. warning::
+            Though a global synchronisation barrier is used between the
+            execution of each group, the timers in each vertex may drift out of
+            sync during each group's execution. Further, the barrier
+            synchronisation does not give any guarantees about how
+            closely-synchronised the timers will be at the start of each run.
+        
+        Parameters
+        ----------
+        app_id : int
+            *Optional.* The SpiNNaker application ID to use for the experiment.
+        create_group_if_none_exist : bool
+            *Optional.* If True (the default), a single group will be
+            automatically created if none have been defined with
+            :py:meth:`.new_group`. This is the most sensible behaviour for most
+            applications.
+            
+            If you *really* want to run an experiment with no experimental
+            groups (where no traffic will ever be generated and no results
+            recorded), you can set this option to False.
+        
+        Returns
+        -------
+        :py:class:`Results`
+            If no vertices reported errors, the experimental results are
+            returned.  See the :py:class:`Results` object for details.
+        
+        Raises
+        ------
+        NetworkTesterError
+            A :py:exc:`NetworkTesterError` is raised if any vertices reported
+            an error. The most common error is likely to be a 'deadline missed'
+            error as a result of the experimental timestep being too short.
+            
+            Any results recorded during the run will be included in the
+            ``results`` attribute of the exception. See the :py:class:`Results`
+            object for details.
+        """
+        # Sensible default: Create a single experimental group if none defined.
+        if create_group_if_none_exist and len(self._groups) == 0:
+            self.new_group()
+        
+        # Place and route the vertices (if required)
+        self.place_and_route()
+        
+        # Add nodes to unused chips to record router counters (if necessary).
+        (vertices, router_recording_vertices,
+            placements, allocations, routes) = \
+                self._add_router_recording_vertices()
+        
+        # Assign a unique routing key to each net
+        net_keys = {net: num << 8
+                    for num, net in enumerate(self._nets)}
+        routing_tables = build_routing_tables(
+            routes,
+            {net: (key, 0xFFFFFF00) for net, key in iteritems(net_keys)})
+        
+        # Specify the appropriate binary for the network tester vertices.
+        binary = pkg_resources.resource_filename(
+            "network_tester", "binaries/network_tester.aplx")
+        application_map = build_application_map(
+            {vertex: binary for vertex in vertices},
+            placements, allocations)
+        
+        # Get the set of source and sink nets for each vertex. Also sets an
+        # explicit ordering of the sources/sinks within each.
+        # {vertex: [source_or_sink, ...], ...}
+        vertices_source_nets = {v: [] for v in vertices}
+        vertices_sink_nets = {v: [] for v in vertices}
+        for net in self._nets:
+            vertices_source_nets[net.source].append(net)
+            for sink in net.sinks:
+                vertices_sink_nets[sink].append(net)
+        
+        vertices_records = self._get_vertex_record_lookup(
+            vertices, router_recording_vertices, placements,
+            vertices_source_nets, vertices_sink_nets)
+        
+        # Fill out the set of commands for each vertex
+        vertices_commands = {
+            vertex: self._construct_vertex_commands(
+                vertex=vertex,
+                source_nets=vertices_source_nets[vertex],
+                sink_nets=vertices_sink_nets[vertex],
+                net_keys=net_keys,
+                records=[cntr for obj, cntr in vertices_records[vertex]])
+            for vertex in vertices
+        }
+        
+        # The data size for the results from each vertex
+        total_num_samples = sum(g.num_samples for g in self._groups)
+        vertices_result_size = {
+            vertex: (
+                # The error flag (one word)
+                1 +
+                # One word per recorded value per sample.
+                (total_num_samples * len(vertices_records[vertex]))
+            ) * 4
+            for vertex in vertices}
+        
+        # The raw result data for each vertex.
+        vertices_result_data = {}
+        
+        # Actually load and run the experiment on the machine.
+        with self._mc.application(app_id):
+            # Allocate SDRAM. This is enough to fit the commands and also any
+            # recored results.
+            vertices_sdram = {}
+            logger.info("Allocating SDRAM...")
+            for vertex in vertices:
+                size = max(
+                    # Size of commands (with length prefix)
+                    vertices_commands[vertex].size,
+                    # Size of results (plus the flags)
+                    vertices_result_size[vertex],
+                )
+                x, y = placements[vertex]
+                p = allocations[vertex][Cores].start
+                vertices_sdram[vertex] = self._mc.sdram_alloc_as_filelike(
+                    size, x=x, y=y, tag=p)
+            
+            # Load each vertex's commands
+            logger.info("Loading {} bytes of commands...".format(
+                sum(c.size for c in itervalues(vertices_commands))))
+            for vertex, sdram in iteritems(vertices_sdram):
+                sdram.write(vertices_commands[vertex].pack())
+            
+            # Load routing tables
+            logger.info("Loading routing tables...")
+            self._mc.load_routing_tables(routing_tables)
+            
+            # Load the application
+            logger.info("Loading application on to {} cores...".format(
+                len(vertices)))
+            self._mc.load_application(application_map)
+            
+            # Run through each experimental group
+            next_barrier = "sync0"
+            for group_num, group in enumerate(self._groups):
+                # Reach the barrier before the run starts
+                logger.info("Waiting for barrier...")
+                num_at_barrier = self._mc.wait_for_cores_to_reach_state(
+                    next_barrier, len(vertices), timeout=2.0)
+                assert num_at_barrier == len(vertices), \
+                    "Not all cores reached the barrier."
+                
+                self._mc.send_signal(next_barrier)
+                next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
+                
+                # Give the run time to complete
+                warmup = self._get_option_value("warmup", group)
+                duration = self._get_option_value("duration", group)
+                cooldown = self._get_option_value("cooldown", group)
+                flush_time = self._get_option_value("flush_time", group)
+                total_time = warmup + duration + cooldown + flush_time
+                
+                logger.info(
+                    "Running group {} ({} of {}) for {} seconds...".format(
+                        group.name, group_num + 1, len(self._groups),
+                        total_time))
+                time.sleep(total_time)
+            
+            # Wait for all cores to exit after their final run
+            logger.info("Waiting for barrier...")
+            num_at_barrier = self._mc.wait_for_cores_to_reach_state(
+                "exit", len(vertices), timeout=2.0)
+            assert num_at_barrier == len(vertices), \
+                  "Not all cores reached the barrier."
+            
+            # Read recorded data back
+            logger.info("Reading back {} bytes of results...".format(
+                sum(itervalues(vertices_result_size))))
+            for vertex, sdram in iteritems(vertices_sdram):
+                sdram.seek(0)
+                vertices_result_data[vertex] = \
+                    sdram.read(vertices_result_size[vertex])
+        
+        # Process read results
+        results = Results(self, self._vertices, self._nets, vertices_records,
+                          router_recording_vertices, placements, routes,
+                          vertices_result_data, self._groups)
+        if results.errors:
+            logger.error(
+                "Experiment completed with errors: {}".format(results.errors))
+            raise NetworkTesterError(results)
+        else:
+            logger.info("Experiment completed successfully")
+            return results
     
     
     def place_and_route(self,
@@ -363,13 +497,25 @@ class Experiment(object):
                         place=place, place_kwargs={},
                         allocate=allocate, allocate_kwargs={},
                         route=route, route_kwargs={}):
-        """Place and route the current experiment, as required.
+        """Place and route the vertices and nets in the current experiment, if
+        required.
         
-        This is called automatically by :py:meth:`.run` if required. If
-        placement, allocation or routing have already been carried out (e.g.
-        by setting the placements, allocations or routes attributes), they will
-        not be carried out again. Set these to None to force re-running any of
-        these algorithms.
+        If extra control is required over placement and routing of vertices and
+        nets in an experiment, this method allows additional constraints and
+        custom placement, allocation and routing options and algorithms to be
+        used.
+        
+        The result of placement, allocation and routing can be found in
+        :py:attr:`placements`, :py:attr:`allocations` and  :py:attr:`routes`
+        respectively.
+        
+        If even greater control is required, :py:attr:`placements`,
+        :py:attr:`allocations` and  :py:attr:`routes` may be set explicitly.
+        Once these attributes have been set, this method will not alter them.
+        
+        Since many applications will not care strongly about placement,
+        allocation and routing, this method is called implicitly by
+        :py:meth:`.run`.
         
         Parameters
         ----------
@@ -432,6 +578,86 @@ class Experiment(object):
                                 placements=self.placements,
                                 allocations=self.allocations,
                                 **allocate_kwargs)
+    
+    
+    @property
+    def placements(self):
+        """A dictionary {:py:class:`Vertex`: (x, y), ...}, or None.
+        
+        Defines the chip on which each vertex will be placed during the
+        experiment. Note that the placement must define the position of *every*
+        vertex. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
+        will cause all vertices to be placed automatically.
+        
+        Setting this attribute will also set :py:attr:`.allocations` and
+        :py:attr:`.routes` to None.
+        
+        See also :py:func:`rig.place_and_route.place`.
+        """
+        return self._placements
+    
+    @placements.setter
+    def placements(self, value):
+        self._placements = value
+        self.allocation = None
+        self.routes = None
+    
+    @property
+    def allocations(self):
+        """A dictionary {:py:class:`Vertex`: {resource: slice}, ...} or None.
+        
+        Defines the resources allocated to each vertex. This must include
+        exactly 1 unit of the :py:class:`~rig.machine.Cores` resource.
+        Note that the allocation must define the resource allocation of *every*
+        vertex. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
+        will cause all vertices to have their resources allocated automatically.
+        
+        Setting this attribute will also set :py:attr:`.routes` to None.
+        
+        See also :py:func:`rig.place_and_route.allocate`.
+        """
+        return self._allocations
+    
+    @allocations.setter
+    def allocations(self, value):
+        self._allocations = value
+        self.routes = None
+    
+    @property
+    def routes(self):
+        """A dictionary {:py:class:`Net`: \
+        :py:class:`rig.place_and_route.routing_tree.RoutingTree`, ...} or None.
+        
+        Defines the route used for each net.  Note that the route must be
+        defined for *every* net. If None, calling :py:meth:`.run` or
+        :py:meth:`.place_and_route` will cause all nets to be routed
+        automatically.
+        
+        See also :py:func:`rig.place_and_route.route`.
+        """
+        return self._routes
+    
+    @routes.setter
+    def routes(self, value):
+        self._routes = value
+    
+    
+    def _any_router_registers_recorded(self):
+        """Are any router registers being recorded?"""
+        return any(self._get_option_value("record_{}".format(counter.name))
+                   for counter in Counters if counter.router_counter)
+    
+    
+    @property
+    def machine(self):
+        if self._machine is None:
+            logger.info("Getting SpiNNaker machine information...")
+            self._machine = self._mc.get_machine()
+        return self._machine
+    
+    @machine.setter
+    def machine(self, value):
+        self._machine = value
     
     
     def _construct_vertex_commands(self, vertex, source_nets, sink_nets,
@@ -640,159 +866,6 @@ class Experiment(object):
         return vertices_records
     
     
-    def run(self, app_id=0x42, create_group_if_none_exist=True):
-        """Run the experiment and return the results."""
-        # Sensible default: Create a single experimental group if none defined.
-        if create_group_if_none_exist and len(self._groups) == 0:
-            self.new_group()
-        
-        # Place and route the vertices (if required)
-        self.place_and_route()
-        
-        # Add nodes to unused chips to record router counters (if necessary).
-        (vertices, router_recording_vertices,
-            placements, allocations, routes) = \
-                self._add_router_recording_vertices()
-        
-        # Assign a unique routing key to each net
-        net_keys = {net: num << 8
-                    for num, net in enumerate(self._nets)}
-        routing_tables = build_routing_tables(
-            routes,
-            {net: (key, 0xFFFFFF00) for net, key in iteritems(net_keys)})
-        
-        # Specify the appropriate binary for the network tester vertices.
-        binary = pkg_resources.resource_filename(
-            "network_tester", "binaries/network_tester.aplx")
-        application_map = build_application_map(
-            {vertex: binary for vertex in vertices},
-            placements, allocations)
-        
-        # Get the set of source and sink nets for each vertex. Also sets an
-        # explicit ordering of the sources/sinks within each.
-        # {vertex: [source_or_sink, ...], ...}
-        vertices_source_nets = {v: [] for v in vertices}
-        vertices_sink_nets = {v: [] for v in vertices}
-        for net in self._nets:
-            vertices_source_nets[net.source].append(net)
-            for sink in net.sinks:
-                vertices_sink_nets[sink].append(net)
-        
-        vertices_records = self._get_vertex_record_lookup(
-            vertices, router_recording_vertices, placements,
-            vertices_source_nets, vertices_sink_nets)
-        
-        # Fill out the set of commands for each vertex
-        vertices_commands = {
-            vertex: self._construct_vertex_commands(
-                vertex=vertex,
-                source_nets=vertices_source_nets[vertex],
-                sink_nets=vertices_sink_nets[vertex],
-                net_keys=net_keys,
-                records=[cntr for obj, cntr in vertices_records[vertex]])
-            for vertex in vertices
-        }
-        
-        # The data size for the results from each vertex
-        total_num_samples = sum(g.num_samples for g in self._groups)
-        vertices_result_size = {
-            vertex: (
-                # The error flag (one word)
-                1 +
-                # One word per recorded value per sample.
-                (total_num_samples * len(vertices_records[vertex]))
-            ) * 4
-            for vertex in vertices}
-        
-        # The raw result data for each vertex.
-        vertices_result_data = {}
-        
-        # Actually load and run the experiment on the machine.
-        with self._mc.application(app_id):
-            # Allocate SDRAM. This is enough to fit the commands and also any
-            # recored results.
-            vertices_sdram = {}
-            logger.info("Allocating SDRAM...")
-            for vertex in vertices:
-                size = max(
-                    # Size of commands (with length prefix)
-                    vertices_commands[vertex].size,
-                    # Size of results (plus the flags)
-                    vertices_result_size[vertex],
-                )
-                x, y = placements[vertex]
-                p = allocations[vertex][Cores].start
-                vertices_sdram[vertex] = self._mc.sdram_alloc_as_filelike(
-                    size, x=x, y=y, tag=p)
-            
-            # Load each vertex's commands
-            logger.info("Loading {} bytes of commands...".format(
-                sum(c.size for c in itervalues(vertices_commands))))
-            for vertex, sdram in iteritems(vertices_sdram):
-                sdram.write(vertices_commands[vertex].pack())
-            
-            # Load routing tables
-            logger.info("Loading routing tables...")
-            self._mc.load_routing_tables(routing_tables)
-            
-            # Load the application
-            logger.info("Loading application on to {} cores...".format(
-                len(vertices)))
-            self._mc.load_application(application_map)
-            
-            # Run through each experimental group
-            next_barrier = "sync0"
-            for group_num, group in enumerate(self._groups):
-                # Reach the barrier before the run starts
-                logger.info("Waiting for barrier...")
-                num_at_barrier = self._mc.wait_for_cores_to_reach_state(
-                    next_barrier, len(vertices), timeout=2.0)
-                assert num_at_barrier == len(vertices), \
-                    "Not all cores reached the barrier."
-                
-                self._mc.send_signal(next_barrier)
-                next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
-                
-                # Give the run time to complete
-                warmup = self._get_option_value("warmup", group)
-                duration = self._get_option_value("duration", group)
-                cooldown = self._get_option_value("cooldown", group)
-                flush_time = self._get_option_value("flush_time", group)
-                total_time = warmup + duration + cooldown + flush_time
-                
-                logger.info(
-                    "Running group {} ({} of {}) for {} seconds...".format(
-                        group.name, group_num + 1, len(self._groups),
-                        total_time))
-                time.sleep(total_time)
-            
-            # Wait for all cores to exit after their final run
-            logger.info("Waiting for barrier...")
-            num_at_barrier = self._mc.wait_for_cores_to_reach_state(
-                "exit", len(vertices), timeout=2.0)
-            assert num_at_barrier == len(vertices), \
-                  "Not all cores reached the barrier."
-            
-            # Read recorded data back
-            logger.info("Reading back {} bytes of results...".format(
-                sum(itervalues(vertices_result_size))))
-            for vertex, sdram in iteritems(vertices_sdram):
-                sdram.seek(0)
-                vertices_result_data[vertex] = \
-                    sdram.read(vertices_result_size[vertex])
-        
-        # Process read results
-        results = Results(self, self._vertices, self._nets, vertices_records,
-                          router_recording_vertices, placements, routes,
-                          vertices_result_data, self._groups)
-        if results.errors:
-            logger.error(
-                "Experiment completed with errors: {}".format(results.errors))
-            raise NetworkTesterError(results)
-        else:
-            logger.info("Experiment completed successfully")
-            return results
-    
     
     def _get_option_value(self, option, group=None, vert_or_net=None):
         """For internal use. Get an option's value for a given
@@ -841,10 +914,10 @@ class Experiment(object):
             self.option = option
         
         def __get__(self, obj, type=None):
-            return obj._get_option_value(self.option, obj.cur_group)
+            return obj._get_option_value(self.option, obj._cur_group)
         
         def __set__(self, obj, value):
-            return obj._set_option_value(self.option, value, obj.cur_group)
+            return obj._set_option_value(self.option, value, obj._cur_group)
     
     
     seed = _Option("seed")
@@ -888,3 +961,161 @@ class Experiment(object):
     use_payload = _Option("use_payload")
     
     consume_packets = _Option("consume_packets")
+
+
+
+class Vertex(object):
+    """A vertex in the experiment, created by :py:meth:`Experiment.new_vertex`.
+    
+    A vertex represents a single core running a traffic generator/consumer.
+    
+    See :ref:`vertex parameters <vertex-attributes>` and :ref:`net parameters
+    <net-attributes>` for experimental parameters associated with vertices.
+    """
+    
+    def __init__(self, experiment, name):
+        self._experiment = experiment
+        self.name = name
+    
+    
+    class _Option(object):
+        """A descriptor which provides access to the experiment's _values
+        dictionary."""
+        
+        def __init__(self, option):
+            self.option = option
+        
+        def __get__(self, obj, type=None):
+            return obj._experiment._get_option_value(
+                self.option, obj._experiment._cur_group, obj)
+        
+        def __set__(self, obj, value):
+            return obj._experiment._set_option_value(
+                self.option, value, obj._experiment._cur_group, obj)
+    
+    seed = _Option("seed")
+    
+    burst_period = _Option("burst_period")
+    burst_duty = _Option("burst_duty")
+    burst_phase = _Option("burst_phase")
+    
+    probability = _Option("probability")
+    
+    use_payload = _Option("use_payload")
+    
+    consume_packets = _Option("consume_packets")
+    
+    def __repr__(self):
+        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
+
+
+class Net(RigNet):
+    """A connection between vertices, created by :py:meth:`Experiment.new_net`.
+    
+    This object inherits its attributes from :py:class:`rig.netlist.Net`.
+    
+    See :ref:`net parameters <net-attributes>` for experimental parameters
+    associated with nets.
+    """
+    
+    def __init__(self, experiment, name, *args, **kwargs):
+        super(Net, self).__init__(*args, **kwargs)
+        self._experiment = experiment
+        self.name = name
+    
+    
+    class _Option(object):
+        """A descriptor which provides access to the experiment's _values
+        dictionary."""
+        
+        def __init__(self, option):
+            self.option = option
+        
+        def __get__(self, obj, type=None):
+            return obj._experiment._get_option_value(
+                self.option, obj._experiment._cur_group, obj)
+        
+        def __set__(self, obj, value):
+            return obj._experiment._set_option_value(
+                self.option, value, obj._experiment._cur_group, obj)
+    
+    burst_period = _Option("burst_period")
+    burst_duty = _Option("burst_duty")
+    burst_phase = _Option("burst_phase")
+    
+    probability = _Option("probability")
+    
+    use_payload = _Option("use_payload")
+    
+    
+    def __repr__(self):
+        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
+
+
+class Group(object):
+    """An experimental group, created by :py:meth:`Experiment.new_group`."""
+    
+    def __init__(self, experiment, name):
+        self._experiment = experiment
+        self.name = name
+        self.labels = OrderedDict()
+    
+    
+    def add_label(self, name, value):
+        """Set the value of a label results column for this group.
+        
+        Label columns can be used to give more meaning to each experimental
+        group. For example::
+        
+            >>> for probability in [0.0, 0.5, 1.0]:
+            ...     with e.new_group() as g:
+            ...         g.add_label("probability", probability)
+            ...         e.probability = probability
+        
+        In the example above, all results generated would feature a
+        'probability' field with the corresponding value for each group making
+        it much easier to plat experimental results.
+        
+        Parameters
+        ----------
+        name : str
+            The name of the field.
+        value
+            The value of the field for this group.
+        """
+        self.labels[name] = value
+    
+    
+    def __enter__(self):
+        """Define parameters for this experimental group."""
+        if self._experiment._cur_group is not None:
+            raise Exception("Cannot nest experimental groups.")
+        self._experiment._cur_group = self
+        return self
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        """Completes the definition of this experimental group."""
+        self._experiment._cur_group = None
+    
+    
+    def __repr__(self):
+        return "<{} {}>".format(self.__class__.__name__, repr(self.name))
+    
+    
+    @property
+    def num_samples(self):
+        """The number of metric recordings which will be made during the
+        execution of this group."""
+        duration = self._experiment._get_option_value("duration", self)
+        timestep = self._experiment._get_option_value("timestep", self)
+        record_interval = self._experiment._get_option_value("record_interval", self)
+        
+        run_steps = int(round(duration / timestep))
+        interval_steps = int(round(record_interval / timestep))
+        
+        if interval_steps == 0:
+            return 1
+        else:
+            return run_steps // interval_steps
+
+

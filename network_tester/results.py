@@ -19,12 +19,32 @@ uint32_le = np.dtype("uint32").newbyteorder("<")
 
 
 class Results(object):
-    """The results of an experiment."""
+    """The results of an experiment, returned by :py:meth:`Experiment.run`.
+    
+    The experimental results may be accessed via one of the methods of this
+    class. These methods produce Numpy :py:class:`~numpy.ndarray` in the form
+    of a `structured array
+    <http://docs.scipy.org/doc/numpy/user/basics.rec.html>`_. The exact set of
+    fields of this array depend on the method used, however, a number of
+    standard fields are universally present:
+    
+    Any fields added using the :py:meth:`Group.add_label` method
+        If a group does not have an associated value for a particular label,
+        the value will be set to None.
+    'group'
+        The :py:class:`Group` object that result is associated with.
+    'time'
+        The time that the value was recorded. Given in seconds since the start
+        of the group's execution (not including any warmup time).
+    
+    A utility function, :py:func:`to_csv`, is also provided which can produce
+    R-compatible CSV files from the output of methods in this class.
+    """
     
     def __init__(self, experiment, vertices, nets, vertices_records,
                  router_recording_vertices, placements, routes,
                  vertices_result_data, groups):
-        """Create a new results container.
+        """Internal use only. Create a new results container.
         
         Parameters
         ----------
@@ -149,7 +169,11 @@ class Results(object):
     
     
     def totals(self):
-        """Gives the total counts for all recorded counters."""
+        """Gives the total counts for all recorded metrics.
+        
+        The output of this method has a field for each recorded metric in
+        addition to the standard fields.
+        """
         totals = self._make_result_array(c.name for c in self._recorded)
         
         for vertex, records in iteritems(self._vertices_records):
@@ -161,7 +185,13 @@ class Results(object):
     
     
     def vertex_totals(self):
-        """Gives the counter totals for all nets sourced/sunk by each vertex."""
+        """Gives the counter totals for each vertex giving the summed metrics
+        of all nets sourced/sunk there.
+        
+        In addition to the standard fields, the output of this method has
+        a 'vertex' field containing the :py:class:`Vertex` object associated
+        with each result along with a field for each recorded net-specific metric.
+        """
         num_vertices = len(self._vertices)
         totals = self._make_result_array([("vertex", object)] +
                                          [c.name for c in self._recorded
@@ -180,7 +210,18 @@ class Results(object):
     
     
     def net_totals(self):
-        """Gives the counter totals for each net."""
+        """Gives the counter totals for each net, summing source and sink
+        specific metrics.
+        
+        In addition to the standard fields, the output of this method has:
+        
+        'net'
+            The :py:class:`Net` object associated with each result.
+        'fan_out'
+            The fan-out of the associated net (i.e. number of sinks).
+        A field for each recorded net-specific metric.
+            ..
+        """
         num_nets = len(self._nets)
         totals = self._make_result_array([("net", object),
                                           ("fan_out", np.uint)] +
@@ -201,8 +242,24 @@ class Results(object):
     
     
     def net_counters(self):
-        """Gives the complete counter values for net in the system listing the
-        counts for every source/sink pair.
+        """Gives the complete counter values for every net in the system,
+        listing the counts for every source/sink pair individually.
+        
+        In addition to the standard fields, the output of this method has:
+        
+        'net'
+            The :py:class:`Net` object associated with each result.
+        'fan_out'
+            The fan-out of the associated net (i.e. number of sinks).
+        'source_vertex'
+            The source :py:class:`Vertex` object.
+        'sink_vertex'
+            The sink :py:class:`Vertex` object.
+        'num_hops'
+            The number of chip-to-chip hops in the route from source to sink.
+            Note that this is 0 for a pair of vertices on the same chip.
+        A field for each recorded net-specific metric.
+            ..
         """
         num_sinks = sum(len(n.sinks) for n in self._nets)
         counts = self._make_result_array([("net", object),
@@ -258,7 +315,17 @@ class Results(object):
     
     
     def router_counters(self):
-        """Gives the router counter values for every chip in the system."""
+        """Gives the router counter values for every chip in the system.
+        
+        In addition to the standard fields, the output of this method has:
+        
+        'x'
+            The X-coordinate of the chip.
+        'y'
+            The Y-coordinate of the chip.
+        A field for each recorded router-specific metric.
+            ..
+        """
         num_chips = len(self._router_recording_vertices)
         
         totals = self._make_result_array(
@@ -286,8 +353,8 @@ class Results(object):
 
 def to_csv(data, col_sep=",", row_sep="\n", none="NA",
            objects_as_name=True):
-    """Render a Numpy structured array produced by network tester as a CSV
-    complete with headings.
+    """Render a structured array produced :py:class:`Results` as a CSV complete
+    with headings.
     
     Parameters
     ----------
@@ -300,9 +367,9 @@ def to_csv(data, col_sep=",", row_sep="\n", none="NA",
     none : str
         The string to use to represent :py:class:`None`. (Default: 'NA')
     objects_as_name : bool
-        If True, any Group, Vertex or Net object in the table of results will
-        be represented by its name attribute rather than the str() of the
-        object.
+        If True, any :py:class:`Group`, :py:class:`Vertex` or :py:class:`Net`
+        object in the table of results will be represented by its name
+        attribute rather than the str() of the object.
     """
     from network_tester.experiment import Group, Vertex, Net
     
