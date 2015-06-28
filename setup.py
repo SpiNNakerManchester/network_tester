@@ -10,6 +10,7 @@ setup(
     packages=find_packages(),
 
     # Metadata for PyPi
+    url="https://github.com/project-rig/network_tester",
     author="Jonathan Heathcote",
     description="SpiNNaker network experiment library.",
     license="GPLv2",
