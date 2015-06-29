@@ -64,6 +64,10 @@ static uint32_t *last_recorded;
 // This buffer holds the results currently being copied into SDRAM by DMA.
 static uint32_t *recorded_value_buffer;
 
+// The value of the router timeout register just before the previous call to
+// `NT_CMD_ROUTER_TIMEOUT`.
+static uint old_router_timeout;
+
 // The number of recording counters which exist for each router, source and
 // sink.
 #define NUM_ROUTER_COUNTERS 16
@@ -414,6 +418,18 @@ void interpreter_main(uint commands_ptr, uint arg1)
 				commands++;
 				break;
 			
+			case NT_CMD_ROUTER_TIMEOUT:
+				old_router_timeout = rtr[RTR_CONTROL];
+				rtr[RTR_CONTROL] = ( (rtr[RTR_CONTROL] & ~0xFFFF0000)
+				                   | ((*commands) & 0xFFFF0000));
+				commands++;
+				break;
+			
+			case NT_CMD_ROUTER_TIMEOUT_RESTORE:
+				rtr[RTR_CONTROL] = ( (rtr[RTR_CONTROL] & ~0xFFFF0000)
+				                   | (old_router_timeout & 0xFFFF0000));
+				break;
+			
 			case NT_CMD_RECORD:
 				to_record = *(commands++);
 				break;
@@ -565,13 +581,21 @@ void c_main(void)
 	                  | 0 << 0  // O: Wrapping mode, not one-shot
 	                  );
 	
-	INFO("Disabling soft_wdog\n");
-	uchar old_soft_wdog = sv->soft_wdog;
-	sv->soft_wdog = 0;
+	uchar old_soft_wdog;
+	if (leadAp) {
+		// Disable the software watchdog. This ensures that the traffic model
+		// does not get watch-dogged by the monitor when heavy incoming traffic
+		// load prevents it acknowledging the watchdog requests.
+		INFO("Disabling soft_wdog\n");
+		uchar old_soft_wdog = sv->soft_wdog;
+		sv->soft_wdog = 0;
+	}
 	
 	INFO("spin1_start\n");
 	spin1_start(SYNC_NOWAIT);
 	
-	INFO("Restoring soft_wdog\n");
-	sv->soft_wdog = old_soft_wdog;
+	if (leadAp) {
+		INFO("Restoring soft_wdog\n");
+		sv->soft_wdog = old_soft_wdog;
+	}
 }

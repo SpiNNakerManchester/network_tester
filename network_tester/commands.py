@@ -18,6 +18,8 @@ class NT_CMD(IntEnum):
     TIMESTEP = 0x04
     RUN = 0x05
     NUM = 0x06
+    ROUTER_TIMEOUT = 0x07
+    ROUTER_TIMEOUT_RESTORE = 0x08
 
     RECORD = 0x10
     RECORD_INTERVAL = 0x11
@@ -202,6 +204,43 @@ class Commands(object):
 
         self._commands.extend([NT_CMD.NUM, num_sources | (num_sinks << 8)])
 
+    def router_timeout(self, wait1, wait2=0):
+        """Set the router timeouts to use on the current chip.
+        
+        Parameters
+        ----------
+        wait1 : int
+            The number of router clock cycles (typically at 133 MHz) to wait
+            before attempting emergency routing. If emergency routing is
+            disabled (wait2 == 0), the packet will be dropped after this delay.
+        wait2 : int
+            The number of router clock cycles to wait while trying to emergency
+            route a packet. If set to 0, emergency routing is disabled.
+        
+        Raises
+        ------
+        ValueError
+            These timeouts may only fall on certain values which can be encoded
+            in the router control register. If a value passed cannot be encoded
+            a ValueError is thrown.
+        """
+        assert not self._exited
+
+        wait1 = wait_time_encode(wait1)
+        wait2 = wait_time_encode(wait2)
+
+        self._commands.extend([NT_CMD.ROUTER_TIMEOUT,
+                               (wait2 << 24) | (wait1 << 16)])
+
+    def router_timeout_restore(self):
+        """Restore the router timeout to its value before the last call to
+        :py:meth:`.router_timeout`. If :py:meth:`.router_timeout` has not been
+        called, this command will produce undefined results.
+        """
+        assert not self._exited
+
+        self._commands.append(NT_CMD.ROUTER_TIMEOUT_RESTORE)
+
     def record(self, *counters):
         """Set the set of counters to record.
 
@@ -352,3 +391,37 @@ class Commands(object):
         if self._sink_key[sink_num] != key:
             self._sink_key[sink_num] = key
             self._commands.extend([NT_CMD.SINK_KEY | (sink_num << 8), key])
+
+
+def wait_time_decode(encoded_wait):
+    """Decode a SpiNNaker router control register wait time value."""
+    # Taken from the datasheet
+    m = (encoded_wait >> 0) & 0xF
+    e = (encoded_wait >> 4) & 0xF
+    
+    if e <= 4:
+        return (m + 16 - (1 << (4 - e))) * (1 << e)
+    else:
+        return (m + 16) * (1 << e)
+
+
+def wait_time_encode(wait):
+    """Encode a given time into the format used by SpiNNaker router control
+    registers.
+    
+    Raises
+    ------
+    ValueError
+        If the supplied wait time cannot be represented exactly.
+    """
+    nearest = wait_time_decode(0)
+    for encoded_wait in range(1 << 8):
+        actual_wait = wait_time_decode(encoded_wait)
+        if wait == actual_wait:
+            return encoded_wait
+        if abs(actual_wait - wait) < abs(nearest - wait):
+            nearest = actual_wait
+    
+    raise ValueError("{} cannot be represented as a valid router wait time. "
+                     "{} is the nearest supported value.".format(
+                         wait, nearest))

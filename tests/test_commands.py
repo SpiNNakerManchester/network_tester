@@ -2,9 +2,45 @@ import pytest
 
 from six import integer_types
 
-from network_tester.commands import NT_CMD, Commands
+from network_tester.commands import \
+    NT_CMD, Commands, wait_time_encode, wait_time_decode
 
 from network_tester.counters import Counters
+
+
+def test_wait_time_decode():
+    # Just test a few commonly used values
+    assert wait_time_decode(0x00) == 0
+    assert wait_time_decode(0x10) == 16
+    assert wait_time_decode(0x4F) == 480
+    
+    # Test for monotonicity
+    last = -1
+    for encoded in range(1 << 8):
+        this = wait_time_decode(encoded)
+        assert this > last
+        last = this
+
+
+def test_wait_time_encode():
+    # Supported values should work correctly
+    assert wait_time_encode(0) == 0
+    assert wait_time_encode(16) == 0x10
+    assert wait_time_encode(480) == 0x4F
+    
+    # Test for consistency
+    for encoded in range(1 << 8):
+        assert wait_time_encode(wait_time_decode(encoded)) == encoded
+    
+    # Test unsupported values fail
+    with pytest.raises(ValueError) as exc_value0:
+        wait_time_encode(479)
+    with pytest.raises(ValueError) as exc_value1:
+        wait_time_encode(481)
+    
+    # A helpful hint should be available too
+    assert "480" in str(exc_value0.value)
+    assert "480" in str(exc_value1.value)
 
 
 def test_exited_only_once():
@@ -101,6 +137,28 @@ def test_num():
     # Should not be able to change
     with pytest.raises(Exception):
         a.num(1, 1)
+
+
+def test_router_timeout():
+    # Make sure setting router timeout works correctly
+    a = Commands()
+    a.router_timeout(16)
+    assert a._commands == [NT_CMD.ROUTER_TIMEOUT, 0x00100000]
+    
+    a.router_timeout(480, 16)
+    assert len(a._commands) == 4
+    assert a._commands[-2:] == [NT_CMD.ROUTER_TIMEOUT, 0x104F0000]
+
+    # Should not be able to set impossible values
+    with pytest.raises(ValueError):
+        a.router_timeout(479)
+
+
+def test_router_timeout_restore():
+    # Make sure restoring the router timeout works correctly
+    a = Commands()
+    a.router_timeout_restore()
+    assert a._commands == [NT_CMD.ROUTER_TIMEOUT_RESTORE]
 
 
 def test_record():

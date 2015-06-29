@@ -429,20 +429,31 @@ def test_machine(monkeypatch):
 
 @pytest.mark.parametrize("router_register", [
     c.name for c in Counters if c.router_counter])
-def test_any_router_registers_recorded(router_register):
+def test_any_router_registers_used(router_register):
     # Should return true if any router register is set to be recorded
     e = Experiment(Mock())
 
     # Should not be true by default
-    assert not e._any_router_registers_recorded()
+    assert not e._any_router_registers_used()
 
     # Should be true when any register enabled
     setattr(e, "record_{}".format(router_register), True)
-    assert e._any_router_registers_recorded()
+    assert e._any_router_registers_used()
 
     # But not when disabled again
     setattr(e, "record_{}".format(router_register), False)
-    assert not e._any_router_registers_recorded()
+    assert not e._any_router_registers_used()
+    
+    # Should be true when a timeout is set
+    e.router_timeout = 16
+    assert e._any_router_registers_used()
+    e.router_timeout = (16, 16)
+    assert e._any_router_registers_used()
+    e.router_timeout = None
+    assert not e._any_router_registers_used()
+    with e.new_group():
+        e.router_timeout = 16
+    assert e._any_router_registers_used()
 
 
 def test_place_and_route():
@@ -528,7 +539,8 @@ def test_place_and_route():
     mock_route.reset_mock()
 
 
-def test_construct_vertex_commands():
+@pytest.mark.parametrize("set_timeouts", [True, False])
+def test_construct_vertex_commands(set_timeouts):
     # XXX: This test is *very* far from being complete. In particular, though
     # the problem supplied is realistic, the output is not checked thouroughly
     # enough.
@@ -567,6 +579,7 @@ def test_construct_vertex_commands():
     # By default, nothing should send and everything should consume
     e.probability = 0.0
     e.consume = True
+    e.router_timeout = 240
 
     # In group0, everything consumes and n0 sends 100% packets and n1 sends 50%
     # packets.
@@ -579,6 +592,11 @@ def test_construct_vertex_commands():
         net0.probability = 1.0
         net1.probability = 1.0
         e.consume = False
+        e.router_timeout = 0
+
+    # In group2, we have a timeout with emergency routing enabled
+    with e.new_group():
+        e.router_timeout = (16, 16)
 
     net_keys = {net0: 0xAA00, net1: 0xBB00}
 
@@ -601,7 +619,8 @@ def test_construct_vertex_commands():
             source_nets=vertices_source_nets[vertex],
             sink_nets=vertices_sink_nets[vertex],
             net_keys=net_keys,
-            records=[Counters.sent]).pack()
+            records=[Counters.sent],
+            set_timeouts=set_timeouts).pack()
         for vertex in vertices
     }
 
@@ -636,6 +655,19 @@ def test_construct_vertex_commands():
 
         ref_cmd = struct.pack("<II", NT_CMD.TIMESTEP, 1000)
         assert ref_cmd in commands
+
+    # Make sure all vertices have the right timeout set
+    for vertex in vertices:
+        commands = vertex_commands[vertex]
+
+        ref_cmd0 = struct.pack("<I", NT_CMD.ROUTER_TIMEOUT)
+        ref_cmd1 = struct.pack("<I", NT_CMD.ROUTER_TIMEOUT_RESTORE)
+        if set_timeouts:
+            assert ref_cmd0 in commands
+            assert ref_cmd1 in commands
+        else:
+            assert ref_cmd0 not in commands
+            assert ref_cmd1 not in commands
 
 
 def test_add_router_recording_vertices():

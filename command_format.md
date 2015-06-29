@@ -86,6 +86,28 @@ Specify the number of traffic sources and sinks this traffic generator should
 impelement. `num_src_snk` has the number of sources in bits 7:0 and the number
 of sinks in bits 15:8.
 
+### 0x07: `NT_CMD_ROUTER_TIMEOUT`
+
+    +------------------+-------------------+
+    | 0x07             | rtr_ctrl          |
+    +------------------+-------------------+
+          1 word             1 word
+
+Configure the SpiNNaker router timeout. The top 16 bits of `rtr_ctrl` will be
+written to the router control register.
+
+### 0x08: `NT_CMD_ROUTER_TIMEOUT_RESTORE`
+
+    +------------------+
+    | 0x08             |
+    +------------------+
+          1 word
+
+Restore the router timeout value just before the last call to
+`NT_CMD_ROUTER_TIMEOUT`. If `NT_CMD_ROUTER_TIMEOUT` has not yet been called,
+the result is undefined.
+
+
 
 Result recording commands
 -------------------------

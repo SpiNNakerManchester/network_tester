@@ -8,7 +8,7 @@ import logging
 
 from collections import OrderedDict
 
-from six import iteritems, itervalues
+from six import iteritems, itervalues, integer_types
 
 from rig.machine import Cores
 
@@ -141,6 +141,7 @@ class Experiment(object):
             "burst_phase": {(None, None): 0.0},
             "use_payload": {(None, None): False},
             "consume_packets": {(None, None): True},
+            "router_timeout": {(None, None): None},
         }
 
         # All counters are global-only options and default to False.
@@ -344,8 +345,9 @@ class Experiment(object):
         # Place and route the vertices (if required)
         self.place_and_route()
 
-        # Add nodes to unused chips to record router counters (if necessary).
-        (vertices, router_recording_vertices,
+        # Add nodes to unused chips to access router registers/counters (if
+        # necessary).
+        (vertices, router_access_vertices,
          placements, allocations, routes) = \
             self._add_router_recording_vertices()
 
@@ -374,7 +376,7 @@ class Experiment(object):
                 vertices_sink_nets[sink].append(net)
 
         vertices_records = self._get_vertex_record_lookup(
-            vertices, router_recording_vertices, placements,
+            vertices, router_access_vertices, placements,
             vertices_source_nets, vertices_sink_nets)
 
         # Fill out the set of commands for each vertex
@@ -384,7 +386,8 @@ class Experiment(object):
                 source_nets=vertices_source_nets[vertex],
                 sink_nets=vertices_sink_nets[vertex],
                 net_keys=net_keys,
-                records=[cntr for obj, cntr in vertices_records[vertex]])
+                records=[cntr for obj, cntr in vertices_records[vertex]],
+                set_timeouts=vertex in router_access_vertices)
             for vertex in vertices
         }
 
@@ -478,7 +481,7 @@ class Experiment(object):
 
         # Process read results
         results = Results(self, self._vertices, self._nets, vertices_records,
-                          router_recording_vertices, placements, routes,
+                          router_access_vertices, placements, routes,
                           vertices_result_data, self._groups)
         if results.errors:
             logger.error(
@@ -637,10 +640,14 @@ class Experiment(object):
     def routes(self, value):
         self._routes = value
 
-    def _any_router_registers_recorded(self):
-        """Are any router registers being recorded?"""
-        return any(self._get_option_value("record_{}".format(counter.name))
-                   for counter in Counters if counter.router_counter)
+    def _any_router_registers_used(self):
+        """Are any router registers being recorded or configured during the
+        experiment?"""
+        return (any(self._get_option_value("record_{}".format(counter.name))
+                    for counter in Counters if counter.router_counter) or
+                self._get_option_value("router_timeout") is not None or
+                any(self._get_option_value("router_timeout", g) is not None
+                    for g in self._groups))
 
     @property
     def machine(self):
@@ -654,7 +661,7 @@ class Experiment(object):
         self._machine = value
 
     def _construct_vertex_commands(self, vertex, source_nets, sink_nets,
-                                   net_keys, records):
+                                   net_keys, records, set_timeouts):
         """For internal use. Produce the Commands for a particular vertex.
 
         Parameters
@@ -669,6 +676,8 @@ class Experiment(object):
             A mapping from net to routing key.
         records : [counter, ...]
             The set of counters this vertex records
+        set_timeouts : bool
+            Should this vertex set the router timeout as required?
         """
         commands = Commands()
 
@@ -708,9 +717,16 @@ class Experiment(object):
             # Synchronise before running the group
             commands.barrier()
 
-            # Turn off consumption at the last possible moment
+            # Turn off consumption and set timeout at the last possible moment
             commands.consume(
                 self._get_option_value("consume_packets", group, vertex))
+            
+            router_timeout = self._get_option_value("router_timeout", group)
+            if router_timeout is not None and set_timeouts:
+                if isinstance(router_timeout, integer_types):
+                    commands.router_timeout(router_timeout)
+                else:
+                    commands.router_timeout(*router_timeout)
 
             # warming up without recording data
             commands.record()
@@ -725,8 +741,10 @@ class Experiment(object):
             commands.record()  # Record nothing during cooldown
             commands.run(self._get_option_value("cooldown", group))
 
-            # Turn consumption back on after the run
+            # Restore router timeout and turn consumption back on after the run
             commands.consume(True)
+            if router_timeout is not None and set_timeouts:
+                commands.router_timeout_restore()
 
             # Drain the network of any remaining packets
             commands.sleep(self._get_option_value("flush_time", group))
@@ -738,16 +756,17 @@ class Experiment(object):
 
     def _add_router_recording_vertices(self):
         """Adds extra vertices to chips with no other vertices to facilitate
-        recording of router counter values, if necessary.
+        recording or setting of router counters and registers, if necessary.
 
         Returns
         -------
-        (vertices, router_recording_vertices, placements, allocations, routes)
+        (vertices, router_access_vertices, placements, allocations, routes)
             vertices is a list containing all vertices (including any added for
             router-recording purposes).
 
-            router_recording_vertices is set of vertices which are responsible
-            for recording router counters on their core.
+            router_access_vertices is set of vertices which are responsible
+            for recording router counters or setting router registers on their
+            core.
 
             placements, allocations and routes are updated sets of placements
             accounting for any new router-recording vertices.
@@ -760,44 +779,45 @@ class Experiment(object):
         allocations = self.allocations.copy()
         routes = self.routes.copy()  # Not actually modified at present
 
-        router_recording_vertices = set()
+        router_access_vertices = set()
 
         # The set of chips (x, y) which have a core allocated to recording
         # router counters.
         recorded_chips = set()
 
-        # If router information is being recorded, a vertex must be assigned on
-        # every chip to recording router counters.
-        if self._any_router_registers_recorded():
-            # Assign the job of recording router values to an arbitrary vertex
-            # on every chip which already has vertices on it.
+        # If router information is being recorded or the router registers are
+        # changed, a vertex must be assigned on every chip to access these
+        # registers.
+        if self._any_router_registers_used():
+            # Assign the job of recording/setting router registers to an
+            # arbitrary vertex on every chip which already has vertices on it.
             for vertex, placement in iteritems(self.placements):
                 if placement not in recorded_chips:
-                    router_recording_vertices.add(vertex)
+                    router_access_vertices.add(vertex)
                     recorded_chips.add(placement)
 
             # If there are chips without any vertices allocated, new
-            # router-recording-only vertices must be added.
+            # router-access-only vertices must be added.
             num_extra_vertices = 0
             for xy in self.machine:
                 if xy not in recorded_chips:
                     # Create a new vertex for recording of router data only.
                     num_extra_vertices += 1
-                    vertex = Vertex(self, "router recorder {}, {}".format(*xy))
-                    router_recording_vertices.add(vertex)
+                    vertex = Vertex(self, "router access {}, {}".format(*xy))
+                    router_access_vertices.add(vertex)
                     recorded_chips.add(xy)
                     placements[vertex] = xy
                     allocations[vertex] = {Cores: slice(1, 2)}
                     vertices.append(vertex)
 
             logger.info(
-                "{} vertices added to record router counters".format(
+                "{} vertices added to access router registers".format(
                     num_extra_vertices))
 
-        return (vertices, router_recording_vertices,
+        return (vertices, router_access_vertices,
                 placements, allocations, routes)
 
-    def _get_vertex_record_lookup(self, vertices, router_recording_vertices,
+    def _get_vertex_record_lookup(self, vertices, router_access_vertices,
                                   placements,
                                   vertices_source_nets, vertices_sink_nets):
         """Generates a lookup from vertex to a list of counters that vertex
@@ -806,7 +826,7 @@ class Experiment(object):
         Parameters
         ----------
         vertices : [:py:class:`.Vertex`, ...]
-        router_recording_vertices : set([:py:class:`.Vertex`, ...])
+        router_access_vertices : set([:py:class:`.Vertex`, ...])
         placements : {:py:class:`.Vertex`: (x, y), ...}
         vertices_source_nets : {:py:class:`.Vertex`: [net, ...], ...}
         vertices_sink_nets : {:py:class:`.Vertex`: [net, ...], ...}
@@ -830,7 +850,7 @@ class Experiment(object):
             records = []
 
             # Add any router-counters if this vertex is recording them
-            if vertex in router_recording_vertices:
+            if vertex in router_access_vertices:
                 xy = placements[vertex]
                 for counter in Counters:
                     if (counter.router_counter and
@@ -953,6 +973,8 @@ class Experiment(object):
     use_payload = _Option("use_payload")
 
     consume_packets = _Option("consume_packets")
+    
+    router_timeout = _Option("router_timeout")
 
 
 class Vertex(object):

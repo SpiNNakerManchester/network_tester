@@ -101,6 +101,30 @@ on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
     Special case: If zero, metrics will be recorded once at the end each
     group's execution.
 
+.. attribute:: Experiment.router_timeout
+
+    Sets the router timeout (in router clock cycles at (usually) 133MHz).
+    
+    Default value: None (do not change)
+    
+    If set to an integer, this sets the number of clock cycles before a packet
+    times out and is dropped. :py:meth:`Experiment.run` will throw a
+    :py:exc:`ValueError` if the value presented is not a valid router timeout.
+    Emergency routing will be disabled.
+    
+    If set to a tuple (wait1, wait2), wait1 sets the number of clock cycles
+    before emergency routing is tried and wait2 gives the number of additional
+    cycles before the packet is dropped. :py:meth:`Experiment.run` will throw a
+    :py:exc:`ValueError` if the values presented are not valid router timeouts.
+    
+    If None, the timeout will be left as the default when the system was
+    booted.
+    
+    If this field is set to anything other than None at any point during the
+    experiment, a single vertex on every chip will be used to set the router
+    timeout. This may result in new vertices being created internally and
+    placed on otherwise unused chips.
+
 
 Metric Recording Selection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
