@@ -565,7 +565,13 @@ void c_main(void)
 	                  | 0 << 0  // O: Wrapping mode, not one-shot
 	                  );
 	
-	INFO("spin1_start\n");
+	INFO("Disabling soft_wdog\n");
+	uchar old_soft_wdog = sv->soft_wdog;
+	sv->soft_wdog = 0;
 	
+	INFO("spin1_start\n");
 	spin1_start(SYNC_NOWAIT);
+	
+	INFO("Restoring soft_wdog\n");
+	sv->soft_wdog = old_soft_wdog;
 }
