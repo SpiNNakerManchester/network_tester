@@ -154,7 +154,7 @@ class Results(object):
             The number of rows in the output to reserve for each sample
             recorded.
         """
-        column_names = [(name, np.uint) if isinstance(name, str) else name
+        column_names = [(name, np.double) if isinstance(name, str) else name
                         for name in column_names]
 
         a = np.zeros((self._num_samples * rows_per_sample, ),
