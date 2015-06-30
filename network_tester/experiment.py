@@ -142,6 +142,7 @@ class Experiment(object):
             "use_payload": {(None, None): False},
             "consume_packets": {(None, None): True},
             "router_timeout": {(None, None): None},
+            "reinject_packets": {(None, None): False},
         }
 
         # All counters are global-only options and default to False.
@@ -358,11 +359,14 @@ class Experiment(object):
             routes,
             {net: (key, 0xFFFFFF00) for net, key in iteritems(net_keys)})
 
-        # Specify the appropriate binary for the network tester vertices.
-        binary = pkg_resources.resource_filename(
+        network_tester_binary = pkg_resources.resource_filename(
             "network_tester", "binaries/network_tester.aplx")
+        reinjector_binary = pkg_resources.resource_filename(
+            "network_tester", "binaries/reinjector.aplx")
+
+        # Specify the appropriate binary for the network tester vertices.
         application_map = build_application_map(
-            {vertex: binary for vertex in vertices},
+            {vertex: network_tester_binary for vertex in vertices},
             placements, allocations)
 
         # Get the set of source and sink nets for each vertex. Also sets an
@@ -387,7 +391,7 @@ class Experiment(object):
                 sink_nets=vertices_sink_nets[vertex],
                 net_keys=net_keys,
                 records=[cntr for obj, cntr in vertices_records[vertex]],
-                set_timeouts=vertex in router_access_vertices)
+                router_access_vertex=vertex in router_access_vertices)
             for vertex in vertices
         }
 
@@ -432,6 +436,15 @@ class Experiment(object):
             # Load routing tables
             logger.info("Loading routing tables...")
             self._mc.load_routing_tables(routing_tables)
+
+            # Load the packet-reinjection application if used. This must be
+            # completed before the main application since it creates a tagged
+            # memory allocation.
+            if self._reinjection_used():
+                logger.info("Loading packet-reinjection application...")
+                self._mc.load_application(reinjector_binary,
+                                          {xy: set([1])
+                                           for xy in self.machine})
 
             # Load the application
             logger.info("Loading application on to {} cores...".format(
@@ -548,6 +561,10 @@ class Experiment(object):
         constraints = constraints or []
         constraints += [ReserveResourceConstraint(Cores, slice(0, 1))]
 
+        # Reserve a core for packet reinjection on each chip (if required)
+        if self._reinjection_used():
+            constraints += [ReserveResourceConstraint(Cores, slice(1, 2))]
+
         if self.placements is None:
             logger.info("Placing vertices...")
             self.placements = place(vertices_resources=vertices_resources,
@@ -590,6 +607,12 @@ class Experiment(object):
         Setting this attribute will also set :py:attr:`.allocations` and
         :py:attr:`.routes` to None.
 
+        Any placement must be valid for the :py:class:`~rig.machine.Machine`
+        specified by the :py:attr:`.machine` attribute. Core 0 must always be
+        reserved for the monitor processor and, if packet reinjection is used
+        or recorded (see :py:attr:`Experiment.reinject_packets`), core 1 must
+        also be reserved for the packet reinjection application.
+
         See also :py:func:`rig.place_and_route.place`.
         """
         return self._placements
@@ -612,6 +635,12 @@ class Experiment(object):
         automatically.
 
         Setting this attribute will also set :py:attr:`.routes` to None.
+
+        Any allocation must be valid for the :py:class:`~rig.machine.Machine`
+        specified by the :py:attr:`.machine` attribute. Core 0 must always be
+        reserved for the monitor processor and, if packet reinjection is used
+        or recorded (see :py:attr:`Experiment.reinject_packets`), core 1 must
+        also be reserved for the packet reinjection application.
 
         See also :py:func:`rig.place_and_route.allocate`.
         """
@@ -641,12 +670,23 @@ class Experiment(object):
         self._routes = value
 
     def _any_router_registers_used(self):
-        """Are any router registers being recorded or configured during the
-        experiment?"""
+        """Are any router registers (including reinjection counters) being
+        recorded or configured during the experiment?"""
         return (any(self._get_option_value("record_{}".format(counter.name))
                     for counter in Counters if counter.router_counter) or
                 self._get_option_value("router_timeout") is not None or
                 any(self._get_option_value("router_timeout", g) is not None
+                    for g in self._groups) or
+                self._reinjection_used())
+
+    def _reinjection_used(self):
+        """Is dropped packet reinjection used (or recorded) in the
+        experiment?
+        """
+        return (any(self._get_option_value("record_{}".format(counter.name))
+                    for counter in Counters if counter.reinjector_counter) or
+                self._get_option_value("reinject_packets") or
+                any(self._get_option_value("reinject_packets", g)
                     for g in self._groups))
 
     @property
@@ -661,7 +701,7 @@ class Experiment(object):
         self._machine = value
 
     def _construct_vertex_commands(self, vertex, source_nets, sink_nets,
-                                   net_keys, records, set_timeouts):
+                                   net_keys, records, router_access_vertex):
         """For internal use. Produce the Commands for a particular vertex.
 
         Parameters
@@ -676,8 +716,9 @@ class Experiment(object):
             A mapping from net to routing key.
         records : [counter, ...]
             The set of counters this vertex records
-        set_timeouts : bool
-            Should this vertex set the router timeout as required?
+        router_access_vertex : bool
+            Should this vertex be used to configure router/reinjector
+            parameters.
         """
         commands = Commands()
 
@@ -717,12 +758,18 @@ class Experiment(object):
             # Synchronise before running the group
             commands.barrier()
 
-            # Turn off consumption and set timeout at the last possible moment
+            # Turn on reinjection as required
+            if router_access_vertex:
+                commands.reinject(
+                    self._get_option_value("reinject_packets", group))
+
+            # Turn off consumption as required
             commands.consume(
                 self._get_option_value("consume_packets", group, vertex))
-            
+
+            # Set the router timeout
             router_timeout = self._get_option_value("router_timeout", group)
-            if router_timeout is not None and set_timeouts:
+            if router_timeout is not None and router_access_vertex:
                 if isinstance(router_timeout, integer_types):
                     commands.router_timeout(router_timeout)
                 else:
@@ -741,10 +788,13 @@ class Experiment(object):
             commands.record()  # Record nothing during cooldown
             commands.run(self._get_option_value("cooldown", group))
 
-            # Restore router timeout and turn consumption back on after the run
+            # Restore router timeout, turn consumption back on and reinjection
+            # back off after the run
             commands.consume(True)
-            if router_timeout is not None and set_timeouts:
+            if router_timeout is not None and router_access_vertex:
                 commands.router_timeout_restore()
+            if router_access_vertex:
+                commands.reinject(False)
 
             # Drain the network of any remaining packets
             commands.sleep(self._get_option_value("flush_time", group))
@@ -853,7 +903,8 @@ class Experiment(object):
             if vertex in router_access_vertices:
                 xy = placements[vertex]
                 for counter in Counters:
-                    if (counter.router_counter and
+                    if ((counter.router_counter or
+                         counter.reinjector_counter) and
                             self._get_option_value(
                                 "record_{}".format(counter.name))):
                         records.append((xy, counter))
@@ -958,6 +1009,10 @@ class Experiment(object):
     record_counter14 = _Option("record_counter14")
     record_counter15 = _Option("record_counter15")
 
+    record_reinjected = _Option("record_reinjected")
+    record_reinject_overflow = _Option("record_reinject_overflow")
+    record_reinject_missed = _Option("record_reinject_missed")
+
     record_sent = _Option("record_sent")
     record_blocked = _Option("record_blocked")
     record_received = _Option("record_received")
@@ -973,8 +1028,10 @@ class Experiment(object):
     use_payload = _Option("use_payload")
 
     consume_packets = _Option("consume_packets")
-    
+
     router_timeout = _Option("router_timeout")
+
+    reinject_packets = _Option("reinject_packets")
 
 
 class Vertex(object):

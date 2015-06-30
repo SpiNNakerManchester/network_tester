@@ -90,9 +90,9 @@ def example_results(example_experiment, example_vertices, example_nets,
     the purpose of recording router registers on chip (0, 1). This gives
     examples of both router-only vertices and dual-purpose vertices.
 
-    Vertices 0, 2 and 4 record the external_p2p and local_p2p counters on their
-    local router. All vertices record packets send and packets received by any
-    nets at that vertex.
+    Vertices 0, 2 and 4 record the external_p2p, local_p2p and reinjected
+    counters on their local router. All vertices record packets send and
+    packets received by any nets at that vertex.
 
     The vertices are named by their number, except for v0 which is named "v0".
 
@@ -126,10 +126,13 @@ def example_results(example_experiment, example_vertices, example_nets,
     Further, the router counters on each chip will increment as follows:
     * (0, 0) local_p2p 10 packets per second.
     * (0, 0) external_p2p 20 packets per second.
+    * (0, 0) reinjected 70 packets per second.
     * (1, 0) local_p2p 30 packets per second.
     * (1, 0) external_p2p 40 packets per second.
+    * (1, 0) reinjected 80 packets per second.
     * (0, 1) local_p2p 50 packets per second.
     * (0, 1) external_p2p 60 packets per second.
+    * (0, 1) reinjected 90 packets per second.
     """
     v0, v1, v2, v3, v4 = example_vertices
     n0, n1, n2 = example_nets
@@ -156,17 +159,20 @@ def example_results(example_experiment, example_vertices, example_nets,
     }
     vertices_records = {v0: [((0, 0), Counters.local_p2p),
                              ((0, 0), Counters.external_p2p),
+                             ((0, 0), Counters.reinjected),
                              (n0, Counters.sent),
                              (n1, Counters.sent)],
                         v1: [(n1, Counters.received)],
                         v2: [((1, 0), Counters.local_p2p),
                              ((1, 0), Counters.external_p2p),
+                             ((1, 0), Counters.reinjected),
                              (n2, Counters.sent),
                              (n0, Counters.received),
                              (n2, Counters.received)],
                         v3: [(n0, Counters.received)],
                         v4: [((0, 1), Counters.local_p2p),
-                             ((0, 1), Counters.external_p2p)]}
+                             ((0, 1), Counters.external_p2p),
+                             ((0, 1), Counters.reinjected)]}
 
     def pack(*args):
         """Pack a series of result values."""
@@ -175,26 +181,26 @@ def example_results(example_experiment, example_vertices, example_nets,
                            *args)
 
     vertices_result_data = {
-        #         lp2p,ep2p,n0src,n1src
-        v0: pack(10, 20, 20, 30,  # g0s0
-                 1, 2, 2, 3,  # g1s0
-                 2, 3, 3, 4),  # g1s1
+        #         lp2p,ep2p,rein,n0src,n1src
+        v0: pack(10, 20, 70, 20, 30,  # g0s0
+                 1, 2, 7, 2, 3,  # g1s0
+                 2, 3, 8, 3, 4),  # g1s1
         #         n1snk
         v1: pack(30,  # g0s0
                  3,  # g1s0
                  4),  # g1s1
-        #         lp2p,ep2p,n2src,n0snk,n2snk
-        v2: pack(30, 40, 40, 20, 40,  # g0s0
-                 3, 4, 4, 2, 4,  # g1s0
-                 4, 5, 5, 3, 5),  # g1s1
+        #         lp2p,ep2p,rein,n2src,n0snk,n2snk
+        v2: pack(30, 40, 80, 40, 20, 40,  # g0s0
+                 3, 4, 8, 4, 2, 4,  # g1s0
+                 4, 5, 9, 5, 3, 5),  # g1s1
         #         n0snk
         v3: pack(20,  # g0s0
                  2,  # g1s0
                  3),  # g1s1
-        #         lp2p,ep2p
-        v4: pack(50, 60,  # g0s0
-                 5, 6,  # g1s0
-                 6, 7),  # g1s1
+        #         lp2p,ep2p,rein
+        v4: pack(50, 60, 90,  # g0s0
+                 5, 6, 9,  # g1s0
+                 6, 7, 10),  # g1s1
     }
 
     r = Results(example_experiment, vertices, example_nets, vertices_records,
@@ -294,6 +300,7 @@ def test_recorded(example_results):
     """Make sure full set of recorded counters is correct."""
     assert example_results._recorded == [Counters.local_p2p,
                                          Counters.external_p2p,
+                                         Counters.reinjected,
                                          Counters.sent,
                                          Counters.received]
 
@@ -302,30 +309,30 @@ def test_vertices_results(example_results, example_vertices):
     """Make sure the results are unpacked correctly."""
     v0, v1, v2, v3, v4 = example_vertices
     model_vertices_results = {
-        #             lp2p,ep2p,n0src,n1src
-        v0: np.array([[10, 20, 20, 30],  # g0s0
-                      [1, 2, 2, 3],  # g1s0
-                      [2, 3, 3, 4]],  # g1s1
+        #             lp2p,ep2p,rein,n0src,n1src
+        v0: np.array([[10, 20, 70, 20, 30],  # g0s0
+                      [1, 2, 7, 2, 3],  # g1s0
+                      [2, 3, 8, 3, 4]],  # g1s1
                      dtype=np.uint),
         #             n1snk
         v1: np.array([[30],  # g0s0
                       [3],  # g1s0
                       [4]],  # g1s1
                      dtype=np.uint),
-        #             lp2p,ep2p,n2src,n0snk,n2snk
-        v2: np.array([[30, 40, 40, 20, 40],  # g0s0
-                      [3, 4, 4, 2, 4],  # g1s0
-                      [4, 5, 5, 3, 5]],  # g1s1
+        #             lp2p,ep2p,rein,n2src,n0snk,n2snk
+        v2: np.array([[30, 40, 80, 40, 20, 40],  # g0s0
+                      [3, 4, 8, 4, 2, 4],  # g1s0
+                      [4, 5, 9, 5, 3, 5]],  # g1s1
                      dtype=np.uint),
         #             n0snk
         v3: np.array([[20],  # g0s0
                       [2],  # g1s0
                       [3]],  # g1s1
                      dtype=np.uint),
-        #             lp2p,ep2p
-        v4: np.array([[50, 60],  # g0s0
-                      [5, 6],  # g1s0
-                      [6, 7]],  # g1s1
+        #             lp2p,ep2p,rein
+        v4: np.array([[50, 60, 90],  # g0s0
+                      [5, 6, 9],  # g1s0
+                      [6, 7, 10]],  # g1s1
                      dtype=np.uint),
     }
     for vertex in example_vertices:
@@ -402,11 +409,15 @@ def test_totals(example_results, example_groups):
                                   "time",
                                   "local_p2p",
                                   "external_p2p",
+                                  "reinjected",
                                   "sent",
                                   "received")
-    assert (totals == np.array([("foo", 1234, None, g0, 1.0, 90, 120, 90, 110),
-                                ("bar", None, 4321, g1, 0.1, 9, 12, 9, 11),
-                                ("bar", None, 4321, g1, 0.2, 12, 15, 12, 15)],
+    assert (totals == np.array([("foo", 1234, None, g0,
+                                 1.0, 90, 120, 240, 90, 110),
+                                ("bar", None, 4321, g1,
+                                 0.1, 9, 12, 24, 9, 11),
+                                ("bar", None, 4321, g1,
+                                 0.2, 12, 15, 27, 12, 15)],
                                dtype=totals.dtype)).all()
 
 
@@ -517,17 +528,18 @@ def test_router_counters(example_results, example_groups):
                                   "x",
                                   "y",
                                   "local_p2p",
-                                  "external_p2p")
+                                  "external_p2p",
+                                  "reinjected")
     assert (counts == np.array(
-        [("foo", 1234, None, g0, 1.0, 0, 0, 10, 20),
-         ("foo", 1234, None, g0, 1.0, 1, 0, 30, 40),
-         ("foo", 1234, None, g0, 1.0, 0, 1, 50, 60),
-         ("bar", None, 4321, g1, 0.1, 0, 0, 1, 2),
-         ("bar", None, 4321, g1, 0.1, 1, 0, 3, 4),
-         ("bar", None, 4321, g1, 0.1, 0, 1, 5, 6),
-         ("bar", None, 4321, g1, 0.2, 0, 0, 2, 3),
-         ("bar", None, 4321, g1, 0.2, 1, 0, 4, 5),
-         ("bar", None, 4321, g1, 0.2, 0, 1, 6, 7)],
+        [("foo", 1234, None, g0, 1.0, 0, 0, 10, 20, 70),
+         ("foo", 1234, None, g0, 1.0, 1, 0, 30, 40, 80),
+         ("foo", 1234, None, g0, 1.0, 0, 1, 50, 60, 90),
+         ("bar", None, 4321, g1, 0.1, 0, 0, 1, 2, 7),
+         ("bar", None, 4321, g1, 0.1, 1, 0, 3, 4, 8),
+         ("bar", None, 4321, g1, 0.1, 0, 1, 5, 6, 9),
+         ("bar", None, 4321, g1, 0.2, 0, 0, 2, 3, 8),
+         ("bar", None, 4321, g1, 0.2, 1, 0, 4, 5, 9),
+         ("bar", None, 4321, g1, 0.2, 0, 1, 6, 7, 10)],
         dtype=counts.dtype)).all()
 
 

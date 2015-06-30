@@ -324,7 +324,8 @@ class Results(object):
         return counts
 
     def router_counters(self):
-        """Gives the router counter values for every chip in the system.
+        """Gives the router and reinjector counter values for every chip in the
+        system.
 
         In addition to the standard fields, the output of this method has:
 
@@ -332,13 +333,14 @@ class Results(object):
             The X-coordinate of the chip.
         'y'
             The Y-coordinate of the chip.
-        A field for each recorded router-specific metric.
+        A field for each recorded router- or reinjector-specific metric.
             ..
         """
         num_chips = len(self._router_recording_vertices)
 
         totals = self._make_result_array(
-            ["x", "y"] + [c.name for c in self._recorded if c.router_counter],
+            ["x", "y"] + [c.name for c in self._recorded
+                          if c.router_counter or c.reinjector_counter],
             rows_per_sample=num_chips)
 
         for chip_num, ((y, x), vertex) in \
@@ -349,7 +351,7 @@ class Results(object):
             totals[chip_num::num_chips]["x"] = x
             totals[chip_num::num_chips]["y"] = y
             for result_column, (obj, counter) in enumerate(records):
-                if counter.router_counter:
+                if counter.router_counter or counter.reinjector_counter:
                     totals[chip_num::num_chips][counter.name] =\
                         results[:, result_column]
 

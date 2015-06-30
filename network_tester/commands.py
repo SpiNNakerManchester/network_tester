@@ -20,6 +20,8 @@ class NT_CMD(IntEnum):
     NUM = 0x06
     ROUTER_TIMEOUT = 0x07
     ROUTER_TIMEOUT_RESTORE = 0x08
+    REINJECTION_ENABLE = 0x09
+    REINJECTION_DISABLE = 0x0A
 
     RECORD = 0x10
     RECORD_INTERVAL = 0x11
@@ -69,6 +71,9 @@ class Commands(object):
         self._current_burst_period = None
         self._current_burst_duty = None
         self._current_burst_phase = None
+
+        # Is packet reinjection enabled?
+        self._reinject = False
 
         # A list of probabilities, one for each source.
         self._probability = None
@@ -206,7 +211,7 @@ class Commands(object):
 
     def router_timeout(self, wait1, wait2=0):
         """Set the router timeouts to use on the current chip.
-        
+
         Parameters
         ----------
         wait1 : int
@@ -216,7 +221,7 @@ class Commands(object):
         wait2 : int
             The number of router clock cycles to wait while trying to emergency
             route a packet. If set to 0, emergency routing is disabled.
-        
+
         Raises
         ------
         ValueError
@@ -240,6 +245,19 @@ class Commands(object):
         assert not self._exited
 
         self._commands.append(NT_CMD.ROUTER_TIMEOUT_RESTORE)
+
+    def reinject(self, enable):
+        """Enable or disable dropped packet reinjection.
+        """
+        assert not self._exited
+
+        if enable != self._reinject:
+            if enable:
+                self._commands.append(NT_CMD.REINJECTION_ENABLE)
+            else:
+                self._commands.append(NT_CMD.REINJECTION_DISABLE)
+
+            self._reinject = enable
 
     def record(self, *counters):
         """Set the set of counters to record.
@@ -398,7 +416,7 @@ def wait_time_decode(encoded_wait):
     # Taken from the datasheet
     m = (encoded_wait >> 0) & 0xF
     e = (encoded_wait >> 4) & 0xF
-    
+
     if e <= 4:
         return (m + 16 - (1 << (4 - e))) * (1 << e)
     else:
@@ -408,7 +426,7 @@ def wait_time_decode(encoded_wait):
 def wait_time_encode(wait):
     """Encode a given time into the format used by SpiNNaker router control
     registers.
-    
+
     Raises
     ------
     ValueError
@@ -421,7 +439,7 @@ def wait_time_encode(wait):
             return encoded_wait
         if abs(actual_wait - wait) < abs(nearest - wait):
             nearest = actual_wait
-    
+
     raise ValueError("{} cannot be represented as a valid router wait time. "
                      "{} is the nearest supported value.".format(
                          wait, nearest))

@@ -107,6 +107,27 @@ Restore the router timeout value just before the last call to
 `NT_CMD_ROUTER_TIMEOUT`. If `NT_CMD_ROUTER_TIMEOUT` has not yet been called,
 the result is undefined.
 
+### 0x09: `NT_CMD_REINJECTION_ENABLE`
+
+    +------------------+
+    | 0x09             |
+    +------------------+
+          1 word
+
+Enable packet reinjection. This command simply enables the router packet
+dropped interrupt on the local router, it expects that another application on
+that chip will handle the interrupt to facilitate packet reinjection.
+
+### 0x0A: `NT_CMD_REINJECTION_DISABLE`
+
+    +------------------+
+    | 0x0A             |
+    +------------------+
+          1 word
+
+Disable packet reinjection. This command simply disables the router packet
+dropped interrupt on the local router. The packet reinjector application on
+this chip is then free to drain its packet buffer at its leisure.
 
 
 Result recording commands
@@ -124,9 +145,13 @@ Enable or disable the recording of particular values during a run.
 `to_record` is a bitmap with the following bits:
 
 * `cnt[15:0]` each bit corresponds with a SpiNNaker router diagnostic counter
-* `cnt[16]` number of sent packets
-* `cnt[17]` number of blocked packets (e.g. not sent due to back-pressure)
-* `cnt[24]` number of received MC packets
+* `cnt[16]` Number of packets reinjected
+* `cnt[17]` Number of reinjector queue overflows
+* `cnt[18]` Number of times the router reported more than one packet being
+            dropped before the reinjector could pick it up.
+* `cnt[24]` number of sent packets
+* `cnt[25]` number of blocked packets (e.g. not sent due to back-pressure)
+* `cnt[28]` number of received MC packets
 
 ### 0x11: `NT_CMD_RECORD_INTERVAL`
 

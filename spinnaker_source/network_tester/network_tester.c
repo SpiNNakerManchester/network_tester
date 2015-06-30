@@ -27,9 +27,9 @@ static uint32_t error_occurred = 0;
 // Bit 24 enables logging number of received packets
 static uint32_t to_record;
 
-#define RECORD_SENT_BIT (1u << 16)
-#define RECORD_BLOCKED_BIT (1u << 17)
-#define RECORD_RECEIVED_BIT (1u << 24)
+#define RECORD_SENT_BIT (1u << 24)
+#define RECORD_BLOCKED_BIT (1u << 25)
+#define RECORD_RECEIVED_BIT (1u << 28)
 
 // The maximum number of values which can be recorded simultaneously (used to
 // set the size of the buffer where results are stored)
@@ -68,9 +68,14 @@ static uint32_t *recorded_value_buffer;
 // `NT_CMD_ROUTER_TIMEOUT`.
 static uint old_router_timeout;
 
+// Pointer to the reinjector counters. If the reinjector is not running, the
+// value of these counters is undefined.
+reinjector_counters_t *reinjector_counters;
+
 // The number of recording counters which exist for each router, source and
 // sink.
 #define NUM_ROUTER_COUNTERS 16
+#define NUM_REINJECTOR_COUNTERS (sizeof(reinjector_counters_t) / sizeof(uint))
 #define NUM_SOURCE_COUNTERS 3
 #define NUM_SINK_COUNTERS 1
 
@@ -78,6 +83,7 @@ static uint old_router_timeout;
 // result counters which may exist.
 #define MAX_NUM_RESULTS(num_sources, num_sinks) ( \
 	NUM_ROUTER_COUNTERS + \
+	NUM_REINJECTOR_COUNTERS + \
 	(NUM_SOURCE_COUNTERS * (num_sources)) + \
 	(NUM_SINK_COUNTERS * (num_sinks)) \
 )
@@ -245,6 +251,14 @@ void record(bool first)
 	for (int counter = 0; counter < NUM_ROUTER_COUNTERS; counter++) {
 		if (to_record & (1u << counter)) {
 			uint32_t value = (((uint32_t *)RTR_BASE) + RTR_DGC0)[counter];
+			APPEND_RESULT(value);
+		}
+	}
+	
+	// Record reinjector counters.
+	for (int counter = 0; counter < NUM_REINJECTOR_COUNTERS; counter++) {
+		if (to_record & (1u << (counter + 16))) {
+			uint32_t value = ((uint32_t *)reinjector_counters)[counter];
 			APPEND_RESULT(value);
 		}
 	}
@@ -430,6 +444,14 @@ void interpreter_main(uint commands_ptr, uint arg1)
 				                   | (old_router_timeout & 0xFFFF0000));
 				break;
 			
+			case NT_CMD_REINJECTION_ENABLE:
+			    rtr[RTR_CONTROL] = rtr[RTR_CONTROL] | RTR_DENABLE_MASK;
+			    break;
+			
+			case NT_CMD_REINJECTION_DISABLE:
+			    rtr[RTR_CONTROL] = rtr[RTR_CONTROL] & ~RTR_DENABLE_MASK;
+			    break;
+			
 			case NT_CMD_RECORD:
 				to_record = *(commands++);
 				break;
@@ -548,6 +570,11 @@ void c_main(void)
 		ERROR("Could not allocate space for recorded_value_buffer.\n");
 		return;
 	}
+	
+	// Get a pointer to the diagnostic counters used by the packet reinjector
+	reinjector_counters = (reinjector_counters_t *)sark_tag_ptr(0xFF, 0);
+	INFO("Reinjector counters are at address 0x%08x\n",
+	     (uint)reinjector_counters);
 	
 	// Load the commands loaded into SDRAM by the host. The commands are prefixed
 	// with a 32-bit integer giving the number of bytes worth of commands.

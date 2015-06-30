@@ -443,7 +443,13 @@ def test_any_router_registers_used(router_register):
     # But not when disabled again
     setattr(e, "record_{}".format(router_register), False)
     assert not e._any_router_registers_used()
-    
+
+    # Should be true if reinjection is used
+    e.reinject_packets = True
+    assert e._any_router_registers_used()
+    e.reinject_packets = False
+    assert not e._any_router_registers_used()
+
     # Should be true when a timeout is set
     e.router_timeout = 16
     assert e._any_router_registers_used()
@@ -456,13 +462,42 @@ def test_any_router_registers_used(router_register):
     assert e._any_router_registers_used()
 
 
-def test_place_and_route():
+@pytest.mark.parametrize("reinjection_register", [
+    c.name for c in Counters if c.reinjector_counter])
+def test_reinjection_used(reinjection_register):
+    # Should return true if any router register is set to be recorded
+    e = Experiment(Mock())
+
+    # Should not be true by default
+    assert not e._reinjection_used()
+
+    # Should be true when any register enabled
+    setattr(e, "record_{}".format(reinjection_register), True)
+    assert e._reinjection_used()
+
+    # But not when disabled again
+    setattr(e, "record_{}".format(reinjection_register), False)
+    assert not e._reinjection_used()
+
+    # Should be true when reinjection is enabled at any point
+    e.reinject_packets = True
+    assert e._reinjection_used()
+    e.reinject_packets = False
+    assert not e._reinjection_used()
+    with e.new_group():
+        e.reinject_packets = True
+    assert e._reinjection_used()
+
+
+@pytest.mark.parametrize("record_reinjected", [True, False])
+def test_place_and_route(record_reinjected):
     mock_mc = Mock()
     mock_place = Mock()
     mock_allocate = Mock()
     mock_route = Mock()
 
     e = Experiment(mock_mc)
+    e.record_reinjected = record_reinjected
 
     # Initially should call all functions
     e.place_and_route(place=mock_place,
@@ -471,6 +506,14 @@ def test_place_and_route():
     assert mock_place.called
     assert mock_allocate.called
     assert mock_route.called
+
+    # Check constraints
+    constraints = mock_place.mock_calls[0][2]["constraints"]
+    if record_reinjected:
+        assert len(constraints) == 2
+    else:
+        assert len(constraints) == 1
+
     mock_place.reset_mock()
     mock_allocate.reset_mock()
     mock_route.reset_mock()
@@ -539,8 +582,8 @@ def test_place_and_route():
     mock_route.reset_mock()
 
 
-@pytest.mark.parametrize("set_timeouts", [True, False])
-def test_construct_vertex_commands(set_timeouts):
+@pytest.mark.parametrize("router_access_vertex", [True, False])
+def test_construct_vertex_commands(router_access_vertex):
     # XXX: This test is *very* far from being complete. In particular, though
     # the problem supplied is realistic, the output is not checked thouroughly
     # enough.
@@ -575,6 +618,8 @@ def test_construct_vertex_commands(set_timeouts):
     e.flush_time = 0.01
 
     e.record_sent = True
+
+    e.reinject_packets = True
 
     # By default, nothing should send and everything should consume
     e.probability = 0.0
@@ -620,7 +665,7 @@ def test_construct_vertex_commands(set_timeouts):
             sink_nets=vertices_sink_nets[vertex],
             net_keys=net_keys,
             records=[Counters.sent],
-            set_timeouts=set_timeouts).pack()
+            router_access_vertex=router_access_vertex).pack()
         for vertex in vertices
     }
 
@@ -662,7 +707,20 @@ def test_construct_vertex_commands(set_timeouts):
 
         ref_cmd0 = struct.pack("<I", NT_CMD.ROUTER_TIMEOUT)
         ref_cmd1 = struct.pack("<I", NT_CMD.ROUTER_TIMEOUT_RESTORE)
-        if set_timeouts:
+        if router_access_vertex:
+            assert ref_cmd0 in commands
+            assert ref_cmd1 in commands
+        else:
+            assert ref_cmd0 not in commands
+            assert ref_cmd1 not in commands
+
+    # Make sure all vertices packet reinjection enabled if requested
+    for vertex in vertices:
+        commands = vertex_commands[vertex]
+
+        ref_cmd0 = struct.pack("<I", NT_CMD.REINJECTION_ENABLE)
+        ref_cmd1 = struct.pack("<I", NT_CMD.REINJECTION_DISABLE)
+        if router_access_vertex:
             assert ref_cmd0 in commands
             assert ref_cmd1 in commands
         else:
@@ -783,8 +841,9 @@ def test_get_vertex_record_lookup():
 @pytest.mark.parametrize("error,error_code", [(False, b"\0\0\0\0"),
                                               (True, b"\x20\0\0\0")])
 @pytest.mark.parametrize("record", [True, False])
+@pytest.mark.parametrize("reinject_packets", [True, False])
 def test_run(auto_create_group, samples_per_group, num_vertices,
-             num_nets_per_vertex, error, error_code, record):
+             num_nets_per_vertex, error, error_code, record, reinject_packets):
     """Make sure that the run command carries out an experiment as would be
     expected."""
     machine = Machine(3, 1)
@@ -799,7 +858,12 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
 
     mock_mc.get_machine.return_value = machine
 
-    mock_mc.wait_for_cores_to_reach_state.return_value = num_vertices
+    if reinject_packets:
+        # If reinjecting, a core is added to every chip
+        mock_mc.wait_for_cores_to_reach_state.return_value = len(list(machine))
+    else:
+        # If not reinjecting, only the vertices are given cores
+        mock_mc.wait_for_cores_to_reach_state.return_value = num_vertices
 
     def mock_sdram_file_read(size):
         return error_code + b"\0"*(size - 4)
@@ -830,6 +894,8 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
     if record:
         e.record_sent = True
 
+    e.reinject_packets = reinject_packets
+
     # Create example vertices
     vertices = [e.new_vertex() for _ in range(num_vertices)]
     for v in vertices:
@@ -845,7 +911,7 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
             e.record_interval = e.duration / float(num_samples)
 
     # The run should fail with an exception when expected.
-    if error and num_vertices > 0:
+    if error and (num_vertices > 0 or reinject_packets):
         with pytest.raises(NetworkTesterError) as exc_info:
             e.run(0x33, create_group_if_none_exist=auto_create_group)
         results = exc_info.value.results
@@ -863,6 +929,14 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
     # The supplied app ID should be used
     mock_mc.application.assert_called_once_with(0x33)
 
+    # If reinjection is enabled, the binary should have been loaded
+    reinjector_loaded = any("reinjector.aplx" in call[1][0]
+                            for call in mock_mc.load_application.mock_calls)
+    if reinject_packets:
+        assert reinjector_loaded
+    else:
+        assert not reinjector_loaded
+
     # Each chip should have been issued with a suitable malloc for any vertices
     # on it.
     for x, vertex in enumerate(vertices):
@@ -874,7 +948,13 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
         else:
             result_size = 4  # Just the status value
         size = max(cmds_size, result_size)
-        mock_mc.sdram_alloc_as_filelike.assert_any_call(size, x=x, y=0, tag=1)
+        if reinject_packets:
+            # During packet reinjection, core 1 is used.
+            core_num = 2
+        else:
+            core_num = 1
+        mock_mc.sdram_alloc_as_filelike.assert_any_call(size, x=x, y=0,
+                                                        tag=core_num)
 
     # The correct number of barriers should have been reached
     num_groups = len(samples_per_group)

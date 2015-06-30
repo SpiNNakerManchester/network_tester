@@ -17,6 +17,11 @@
 #define MAX(a, b) (((a) < (b)) ? (b) : (a))
 #endif
 
+// The bit in the router control register which enables interrupts on packet
+// dropping. This is used to indirectly enable/disable the packet reinjector.
+#define RTR_DENABLE_BIT 2
+#define RTR_DENABLE_MASK (1 << RTR_DENABLE_BIT)
+
 // Debug/info printing macros
 #if false
 #define DEBUG(...) io_printf(IO_BUF, "DEBUG: " __VA_ARGS__)
@@ -38,6 +43,8 @@
 #define NT_CMD_NUM 0x06
 #define NT_CMD_ROUTER_TIMEOUT 0x07
 #define NT_CMD_ROUTER_TIMEOUT_RESTORE 0x08
+#define NT_CMD_REINJECTION_ENABLE 0x09
+#define NT_CMD_REINJECTION_DISABLE 0x0A
 
 #define NT_CMD_RECORD 0x10
 #define NT_CMD_RECORD_INTERVAL 0x11
@@ -102,5 +109,18 @@ typedef struct {
 	// Count of packets which have arrived at this core
 	uint32_t arrived_count;
 } sink_t;
+
+/**
+ * The struct used by the packet reinjector for its status counters.
+ */
+typedef struct {
+	// Number of packets reinjected
+	uint32_t reinjected;
+	// Number of packet queue overflows
+	uint32_t reinject_overflow;
+	// Number of times at least one packet wasn't removed from the router in
+	// time.
+	uint32_t reinject_missed;
+} reinjector_counters_t;
 
 #endif

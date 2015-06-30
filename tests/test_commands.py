@@ -13,7 +13,7 @@ def test_wait_time_decode():
     assert wait_time_decode(0x00) == 0
     assert wait_time_decode(0x10) == 16
     assert wait_time_decode(0x4F) == 480
-    
+
     # Test for monotonicity
     last = -1
     for encoded in range(1 << 8):
@@ -27,17 +27,17 @@ def test_wait_time_encode():
     assert wait_time_encode(0) == 0
     assert wait_time_encode(16) == 0x10
     assert wait_time_encode(480) == 0x4F
-    
+
     # Test for consistency
     for encoded in range(1 << 8):
         assert wait_time_encode(wait_time_decode(encoded)) == encoded
-    
+
     # Test unsupported values fail
     with pytest.raises(ValueError) as exc_value0:
         wait_time_encode(479)
     with pytest.raises(ValueError) as exc_value1:
         wait_time_encode(481)
-    
+
     # A helpful hint should be available too
     assert "480" in str(exc_value0.value)
     assert "480" in str(exc_value1.value)
@@ -144,7 +144,7 @@ def test_router_timeout():
     a = Commands()
     a.router_timeout(16)
     assert a._commands == [NT_CMD.ROUTER_TIMEOUT, 0x00100000]
-    
+
     a.router_timeout(480, 16)
     assert len(a._commands) == 4
     assert a._commands[-2:] == [NT_CMD.ROUTER_TIMEOUT, 0x104F0000]
@@ -161,6 +161,32 @@ def test_router_timeout_restore():
     assert a._commands == [NT_CMD.ROUTER_TIMEOUT_RESTORE]
 
 
+def test_reinject():
+    # Make sure reinjection toggling works
+    a = Commands()
+
+    # Shouldn't turn off if already off
+    a.reinject(False)
+    assert a._commands == []
+
+    # Should enable
+    a.reinject(True)
+    assert a._commands == [NT_CMD.REINJECTION_ENABLE]
+
+    # Should not duplicate
+    a.reinject(True)
+    assert len(a._commands) == 1
+
+    # Should toggle again
+    a.reinject(False)
+    assert len(a._commands) == 2
+    assert a._commands[-1:] == [NT_CMD.REINJECTION_DISABLE]
+
+    # Should not duplicate
+    a.reinject(False)
+    assert len(a._commands) == 2
+
+
 def test_record():
     # Make sure setting recorded counters works
     a = Commands()
@@ -172,7 +198,7 @@ def test_record():
 
     # Should be able to set multiple things
     a.record(Counters.local_multicast, Counters.sent)
-    assert a._commands == [NT_CMD.RECORD, (1 << 0) | (1 << 16)]
+    assert a._commands == [NT_CMD.RECORD, (1 << 0) | (1 << 24)]
 
     # Doing the same again shouldn't add a new command
     a.record(Counters.local_multicast, Counters.sent)

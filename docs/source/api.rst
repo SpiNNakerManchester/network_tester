@@ -125,6 +125,19 @@ on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
     timeout. This may result in new vertices being created internally and
     placed on otherwise unused chips.
 
+.. attribute:: Experiment.reinject_packets
+    
+    Enable dropped packet reinjection.
+    
+    Default value: False (do not use dropped packet reinjection).
+    
+    Enabling this feature at any point during the experiment will cause core 1
+    to be reserved on *all* chips to perform packet reinjection.
+    
+    See also: :py:attr:`Experiment.record_reinjected`,
+    :py:attr:`Experiment.record_reinject_overflow` and
+    :py:attr:`Experiment.record_reinject_missed`.
+
 
 Metric Recording Selection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -159,7 +172,36 @@ By default, no metrics are recorded.
     If any of these metrics are recorded, a single vertex on every chip will be
     configured accordingly ensuring router counter values are recorded for all
     chips in the machine. This may result in new vertices being created
-    internally and placed on otherwise unused chips.
+    internally and placed on core 2 of otherwise unused chips.
+
+
+.. attribute:: Experiment.record_reinjected
+               Experiment.record_reinject_overflow
+               Experiment.record_reinject_missed
+    
+    Records droppped packet reinjection metrics.
+    
+    :py:attr:`Experiment.record_reinjected`
+        The number of dropped packets which have been reinjected.
+    :py:attr:`Experiment.record_reinject_overflow`
+        The number of dropped packets which were not reinjected due to the
+        packet reinjector's buffer being full.
+    :py:attr:`Experiment.record_reinject_missed`
+        A lower bound on the number of dropped packets which were not
+        reinjected due to the packet reinjector being unable to collect them
+        from the router in time.
+    
+    If any of these metrics are recorded, a single vertex on every chip will be
+    configured accordingly ensuring router counter values are recorded for all
+    chips in the machine. This may result in new vertices being created
+    internally and placed on core 2 of otherwise unused chips.
+    
+    Additionally, recording any of these values will cause a further core to be
+    reserved on *all* chips to perform packet reinjection, even if it is not
+    enabled by :py:attr:`Experiment.reinject_packets` at any point in the
+    experiment.
+    
+    See also: :py:attr:`Experiment.reinject_packets`.
 
 
 .. attribute:: Experiment.record_sent

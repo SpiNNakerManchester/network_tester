@@ -1,7 +1,7 @@
 # The name of the binary to be built 
 APP = network_tester
 
-APP_OUTPUT_DIR = ../network_tester/binaries/
+APP_OUTPUT_DIR = ../../network_tester/binaries/
 BUILD_DIR = build/
 
 OBJECTS = network_tester.o

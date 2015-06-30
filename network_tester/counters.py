@@ -28,12 +28,17 @@ class Counters(IntEnum):
     counter14 = 1 << 14
     counter15 = 1 << 15
 
+    # Reinjector counters
+    reinjected = 1 << 16
+    reinject_overflow = 1 << 17
+    reinject_missed = 1 << 18
+
     # Source counters
-    sent = 1 << 16
-    blocked = 1 << 17
+    sent = 1 << 24
+    blocked = 1 << 25
 
     # Sink counters
-    received = 1 << 24
+    received = 1 << 28
 
     @property
     def router_counter(self):
@@ -41,11 +46,16 @@ class Counters(IntEnum):
         return self <= (1 << 15)
 
     @property
+    def reinjector_counter(self):
+        """True if a reinjector counter."""
+        return (1 << 16) <= self <= (1 << 23)
+
+    @property
     def source_counter(self):
         """True if a source counter."""
-        return (1 << 16) <= self <= (1 << 23)
+        return (1 << 24) <= self <= (1 << 27)
 
     @property
     def sink_counter(self):
         """True if a sink counter."""
-        return (1 << 24) <= self <= (1 << 31)
+        return (1 << 28) <= self <= (1 << 31)
