@@ -326,7 +326,7 @@ class Experiment(object):
             If True, any realtime deadline-missed errors will no longer cause
             this method to raise an exception. Other errors will still cause an
             exception to be raised.
-            
+
             This option is useful when running experiments which involve
             over-saturating packet sinks or the network in some experimental
             groups.
@@ -705,7 +705,7 @@ class Experiment(object):
     def machine(self):
         """The :py:class:`~rig.machine.Machine` object describing the SpiNNaker
         system under test.
-        
+
         This property caches the machine description read from the machine to
         avoid repeatedly polling the SpiNNaker system.
         """
