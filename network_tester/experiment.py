@@ -290,7 +290,8 @@ class Experiment(object):
         self._groups.append(g)
         return g
 
-    def run(self, app_id=0x42, create_group_if_none_exist=True):
+    def run(self, app_id=0x42, create_group_if_none_exist=True,
+            ignore_deadline_errors=False):
         """Run the experiment on SpiNNaker and return the results.
 
         If placements, allocations or routes have not been provided, the
@@ -321,6 +322,14 @@ class Experiment(object):
             If you *really* want to run an experiment with no experimental
             groups (where no traffic will ever be generated and no results
             recorded), you can set this option to False.
+        ignore_deadline_errors : bool
+            If True, any realtime deadline-missed errors will no longer cause
+            this method to raise an exception. Other errors will still cause an
+            exception to be raised.
+            
+            This option is useful when running experiments which involve
+            over-saturating packet sinks or the network in some experimental
+            groups.
 
         Returns
         -------
@@ -333,7 +342,9 @@ class Experiment(object):
         NetworkTesterError
             A :py:exc:`NetworkTesterError` is raised if any vertices reported
             an error. The most common error is likely to be a 'deadline missed'
-            error as a result of the experimental timestep being too short.
+            error as a result of the experimental timestep being too short or
+            the load on some vertices too high in extreme circumstances. Other
+            types of error indicate far more severe problems.
 
             Any results recorded during the run will be included in the
             ``results`` attribute of the exception. See the :py:class:`Results`
@@ -496,7 +507,8 @@ class Experiment(object):
         results = Results(self, self._vertices, self._nets, vertices_records,
                           router_access_vertices, placements, routes,
                           vertices_result_data, self._groups)
-        if results.errors:
+        if any(not e.is_deadline if ignore_deadline_errors else True
+               for e in results.errors):
             logger.error(
                 "Experiment completed with errors: {}".format(results.errors))
             raise NetworkTesterError(results)
@@ -691,6 +703,12 @@ class Experiment(object):
 
     @property
     def machine(self):
+        """The :py:class:`~rig.machine.Machine` object describing the SpiNNaker
+        system under test.
+        
+        This property caches the machine description read from the machine to
+        avoid repeatedly polling the SpiNNaker system.
+        """
         if self._machine is None:
             logger.info("Getting SpiNNaker machine information...")
             self._machine = self._mc.get_machine()

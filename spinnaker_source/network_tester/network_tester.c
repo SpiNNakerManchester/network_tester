@@ -293,13 +293,13 @@ void record(bool first)
 /**
  * Run the traffic generator for the specified number of samples.
  *
- * Returns true if a timing deadline was missed or false otherwise.
+ * Returns error code if a timing deadline was missed or false otherwise.
  */
-bool run(uint32_t time_left_steps)
+uint32_t run(uint32_t time_left_steps)
 {
-	// Has the packet generator missed a timing deadline? If so, the stream of
-	// packets generated is not correct.
-	bool deadline_missed = false;
+	// The number of timing deadlines missed
+	uint32_t deadlines_missed = 0;
+	uint32_t num_steps = time_left_steps;
 	
 	// Tick 0 should occur immediately
 	int32_t next_timestep_ticks = (int32_t)tc2[TC_COUNT];
@@ -318,7 +318,7 @@ bool run(uint32_t time_left_steps)
 			continue;
 		next_timestep_ticks -= (uint32_t)timestep_ticks;
 		if (time_ticks - next_timestep_ticks <= 0)
-			deadline_missed = true;
+			deadlines_missed++;
 		time_left_steps--;
 		
 		for (int i = 0; i < num_sources; i++) {
@@ -363,7 +363,12 @@ bool run(uint32_t time_left_steps)
 	if (record_interval_steps == 0)
 		record(false);
 	
-	return deadline_missed;
+	uint32_t errors = (deadlines_missed ? NT_ERR_DEADLINE_MISSED : 0) |
+	                  (deadlines_missed > (num_steps / 2)
+	                   ? NT_ERR_MOST_DEADLINES_MISSED
+	                   : 0);
+	error_occurred |= errors;
+	return errors;
 }
 
 
@@ -422,7 +427,6 @@ void interpreter_main(uint commands_ptr, uint arg1)
 			case NT_CMD_RUN:
 				if (run(*(commands++))) {
 					ERROR("Timing deadline(s) missed during run\n");
-					error_occurred |= NT_ERR_DEADLINE_MISSED;
 				}
 				break;
 			

@@ -68,6 +68,7 @@
 #define NT_ERR_UNKNOWN_COMMAND (1 << 3)
 #define NT_ERR_BAD_ARGUMENTS (1 << 4)
 #define NT_ERR_DEADLINE_MISSED (1 << 5)
+#define NT_ERR_MOST_DEADLINES_MISSED (1 << 6)
 
 
 /**

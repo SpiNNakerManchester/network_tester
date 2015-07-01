@@ -25,6 +25,15 @@ class NT_ERR(IntEnum):
     """A realtime deadline was missed."""
     DEADLINE_MISSED = 1 << 5
 
+    """More than half of the realtime deadlines were missed during at least one
+    phase of the experiment."""
+    MOST_DEADLINES_MISSED = 1 << 6
+
+    @property
+    def is_deadline(self):
+        """True iff the flag indicates a deadline was missed."""
+        return self in (NT_ERR.DEADLINE_MISSED, NT_ERR.MOST_DEADLINES_MISSED)
+
     @classmethod
     def from_int(cls, integer):
         """Unpack an integer into a list of NT_ERR values."""

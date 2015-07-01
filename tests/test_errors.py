@@ -19,6 +19,17 @@ def test_from_int():
         NT_ERR.from_int(0xFFFFFFFF)
 
 
+def test_is_deadline():
+    assert not NT_ERR.STILL_RUNNING.is_deadline
+    assert not NT_ERR.MALLOC.is_deadline
+    assert not NT_ERR.DMA.is_deadline
+    assert not NT_ERR.UNKNOWN_COMMAND.is_deadline
+    assert not NT_ERR.BAD_ARGUMENTS.is_deadline
+    
+    assert NT_ERR.DEADLINE_MISSED.is_deadline
+    assert NT_ERR.MOST_DEADLINES_MISSED.is_deadline
+
+
 def test_exception():
     # The exception should be able to unpack the set of errors from a set of
     # results into a sensible message
