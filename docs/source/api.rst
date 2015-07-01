@@ -1,20 +1,24 @@
+.. _api-documentation:
+
 .. py:module:: network_tester
 
 The Network Tester API
-------------------------
+----------------------
 
 The :py:class:`Experiment` Class
 ````````````````````````````````
 
 .. autoclass:: Experiment()
     :members: __init__, new_vertex, new_net, new_group, run, place_and_route,
-              placements, allocations, routes
+              placements, allocations, routes, machine
+
+.. _experimental-parameters:
 
 Experimental Parameters
 ```````````````````````
 
-Global
-~~~~~~
+Global Parameters
+~~~~~~~~~~~~~~~~~
 
 The following experimental parameters apply globally and cannot be overridden
 on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
@@ -100,6 +104,8 @@ on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
     
     Special case: If zero, metrics will be recorded once at the end each
     group's execution.
+    
+    See :ref:`metric-recording` for the set of metrics which can be recorded.
 
 .. attribute:: Experiment.router_timeout
 
@@ -138,94 +144,12 @@ on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
     :py:attr:`Experiment.record_reinject_overflow` and
     :py:attr:`Experiment.record_reinject_missed`.
 
+Net/Traffic Generator Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Metric Recording Selection
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The following boolean attributes control what metrics are recorded during an
-experiment. Note that the set of recorded metrics may not be changed during an
-experiment (though the recording interval can, see
-:py:attr:`Experiment.record_interval`.
-
-By default, no metrics are recorded.
-
-
-.. attribute:: Experiment.record_local_multicast
-               Experiment.record_external_multicast
-               Experiment.record_local_p2p
-               Experiment.record_external_p2p
-               Experiment.record_local_nearest_neighbour
-               Experiment.record_external_nearest_neighbour
-               Experiment.record_local_fixed_route
-               Experiment.record_external_fixed_route
-               Experiment.record_dropped_multicast
-               Experiment.record_dropped_p2p
-               Experiment.record_dropped_nearest_neighbour
-               Experiment.record_dropped_fixed_route
-               Experiment.record_counter12
-               Experiment.record_counter13
-               Experiment.record_counter14
-               Experiment.record_counter15
-    
-    Record changes in each of the SpiNNaker router counter registers.
-    
-    If any of these metrics are recorded, a single vertex on every chip will be
-    configured accordingly ensuring router counter values are recorded for all
-    chips in the machine. This may result in new vertices being created
-    internally and placed on core 2 of otherwise unused chips.
-
-
-.. attribute:: Experiment.record_reinjected
-               Experiment.record_reinject_overflow
-               Experiment.record_reinject_missed
-    
-    Records droppped packet reinjection metrics.
-    
-    :py:attr:`Experiment.record_reinjected`
-        The number of dropped packets which have been reinjected.
-    :py:attr:`Experiment.record_reinject_overflow`
-        The number of dropped packets which were not reinjected due to the
-        packet reinjector's buffer being full.
-    :py:attr:`Experiment.record_reinject_missed`
-        A lower bound on the number of dropped packets which were not
-        reinjected due to the packet reinjector being unable to collect them
-        from the router in time.
-    
-    If any of these metrics are recorded, a single vertex on every chip will be
-    configured accordingly ensuring router counter values are recorded for all
-    chips in the machine. This may result in new vertices being created
-    internally and placed on core 2 of otherwise unused chips.
-    
-    Additionally, recording any of these values will cause a further core to be
-    reserved on *all* chips to perform packet reinjection, even if it is not
-    enabled by :py:attr:`Experiment.reinject_packets` at any point in the
-    experiment.
-    
-    See also: :py:attr:`Experiment.reinject_packets`.
-
-
-.. attribute:: Experiment.record_sent
-    
-    Record the number of packets successfully sent for each net.
-
-
-.. attribute:: Experiment.record_blocked
-    
-    Record the number of packets which could not be sent for each net due to
-    back-pressure from the network. Note that blocked packets are not resent.
-
-
-.. attribute:: Experiment.record_received
-    
-    Record the number of packets received at each sink of each net.
-
-.. _net-attributes:
-
-Net
-~~~
-
-The following experimental parameters apply to each net in the experiment.
-These control the pattern of packets generated and sent down each net.
+The following experimental parameters apply to each net (and thus each traffic
+generator) in the experiment and control the pattern of packets generated and
+sent down each net.
 
 The global default for each value can be set by setting the corresponding
 :py:class:`Experiment` attribute.
@@ -336,8 +260,8 @@ For example::
 
 .. _vertex-attributes:
 
-Vertex
-~~~~~~
+Vertex Parameters
+~~~~~~~~~~~~~~~~~
 
 The following experimental parameters apply to each vertex in the experiment.
 
@@ -370,6 +294,92 @@ These values may also be overridden on a group-by-group basis.
     See also :py:attr:`Experiment.flush_time`.
 
 
+.. _metric-recording:
+
+Metric Recording Selection
+``````````````````````````
+
+The following boolean attributes control what metrics are recorded during an
+experiment. Note that the set of recorded metrics may not be changed during an
+experiment (though the recording interval can, see
+:py:attr:`Experiment.record_interval`.
+
+By default, no metrics are recorded.
+
+
+.. attribute:: Experiment.record_local_multicast
+               Experiment.record_external_multicast
+               Experiment.record_local_p2p
+               Experiment.record_external_p2p
+               Experiment.record_local_nearest_neighbour
+               Experiment.record_external_nearest_neighbour
+               Experiment.record_local_fixed_route
+               Experiment.record_external_fixed_route
+               Experiment.record_dropped_multicast
+               Experiment.record_dropped_p2p
+               Experiment.record_dropped_nearest_neighbour
+               Experiment.record_dropped_fixed_route
+               Experiment.record_counter12
+               Experiment.record_counter13
+               Experiment.record_counter14
+               Experiment.record_counter15
+    
+    Record changes in each of the SpiNNaker router counter registers.
+    
+    If any of these metrics are recorded, a single vertex on every chip will be
+    configured accordingly ensuring router counter values are recorded for all
+    chips in the machine. This may result in new vertices being created
+    internally and placed on core 2 of otherwise unused chips.
+
+
+.. attribute:: Experiment.record_reinjected
+               Experiment.record_reinject_overflow
+               Experiment.record_reinject_missed
+    
+    Records droppped packet reinjection metrics.
+    
+    :py:attr:`Experiment.record_reinjected`
+        The number of dropped packets which have been reinjected.
+    :py:attr:`Experiment.record_reinject_overflow`
+        The number of dropped packets which were not reinjected due to the
+        packet reinjector's buffer being full.
+    :py:attr:`Experiment.record_reinject_missed`
+        A lower bound on the number of dropped packets which were not
+        reinjected due to the packet reinjector being unable to collect them
+        from the router in time.
+    
+    If any of these metrics are recorded, a single vertex on every chip will be
+    configured accordingly ensuring router counter values are recorded for all
+    chips in the machine. This may result in new vertices being created
+    internally and placed on core 2 of otherwise unused chips.
+    
+    Additionally, recording any of these values will cause a further core to be
+    reserved on *all* chips to perform packet reinjection, even if it is not
+    enabled by :py:attr:`Experiment.reinject_packets` at any point in the
+    experiment.
+    
+    See also: :py:attr:`Experiment.reinject_packets`.
+
+
+.. attribute:: Experiment.record_sent
+    
+    Record the number of packets successfully sent for each net.
+
+
+.. attribute:: Experiment.record_blocked
+    
+    Record the number of packets which could not be sent for each net due to
+    back-pressure from the network. Note that blocked packets are not resent.
+
+
+.. attribute:: Experiment.record_received
+    
+    Record the number of packets received at each sink of each net.
+
+.. _net-attributes:
+
+
+
 The :py:class:`Results` Class
 `````````````````````````````
 
@@ -377,6 +387,7 @@ The :py:class:`Results` Class
     :members:
 
 .. autofunction:: to_csv
+
 
 The :py:class:`Vertex`, :py:class:`Net` and :py:class:`Group` Classes
 `````````````````````````````````````````````````````````````````````

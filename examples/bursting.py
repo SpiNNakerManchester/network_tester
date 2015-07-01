@@ -85,13 +85,7 @@ e.record_external_multicast = True
 e.record_dropped_multicast = True
 
 # Run the experiment
-try:
-    results = e.run()
-except NetworkTesterError as exc:
-    # If the experiment reports an error (e.g. due to a realtime deadline being
-    # missed), just report it, don't throw the results away!
-    print(exc)
-    results = exc.results
+results = e.run(ignore_deadline_errors=True)
 
 
 ###############################################################################

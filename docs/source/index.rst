@@ -21,14 +21,13 @@ be performed with 'Network Tester':
 
 .. _SpiNNaker: http://apt.cs.manchester.ac.uk/projects/SpiNNaker/
 
-Installation
-------------
+Getting started
+---------------
 
-The latest stable version of network tester may be installed from PyPI_ using::
-
-    $ pip install network_tester
-
-.. _PyPI: https://pypi.python.org/pypi/network_tester
+.. toctree::
+   :maxdepth: 3
+   
+   getting_started
 
 API Reference
 -------------
