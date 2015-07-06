@@ -470,7 +470,8 @@ class Experiment(object):
                 num_at_barrier = self._mc.wait_for_cores_to_reach_state(
                     next_barrier, len(vertices), timeout=2.0)
                 assert num_at_barrier == len(vertices), \
-                    "Not all cores reached the barrier."
+                    "Not all cores reached the barrier " \
+                    "before {}.".format(group)
 
                 self._mc.send_signal(next_barrier)
                 next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
@@ -493,7 +494,7 @@ class Experiment(object):
             num_at_barrier = self._mc.wait_for_cores_to_reach_state(
                 "exit", len(vertices), timeout=2.0)
             assert num_at_barrier == len(vertices), \
-                "Not all cores reached the barrier."
+                "Not all cores reached the final barrier."
 
             # Read recorded data back
             logger.info("Reading back {} bytes of results...".format(
@@ -875,7 +876,7 @@ class Experiment(object):
                     router_access_vertices.add(vertex)
                     recorded_chips.add(xy)
                     placements[vertex] = xy
-                    allocations[vertex] = {Cores: slice(1, 2)}
+                    allocations[vertex] = {Cores: slice(2, 3)}
                     vertices.append(vertex)
 
             logger.info(
