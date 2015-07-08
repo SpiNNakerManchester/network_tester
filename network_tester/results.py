@@ -363,7 +363,7 @@ class Results(object):
                                if self.errors else "")
 
 
-def to_csv(data, col_sep=",", row_sep="\n", none="NA",
+def to_csv(data, header=True, col_sep=",", row_sep="\n", none="NA",
            objects_as_name=True):
     """Render a structured array produced :py:class:`Results` as a CSV complete
     with headings.
@@ -372,6 +372,9 @@ def to_csv(data, col_sep=",", row_sep="\n", none="NA",
     ----------
     data : :py:class:`np.ndarray`
         A structured array produced by :py:class:`Results`.
+    header : bool
+        If True, column headings are included in the output. If False, they are
+        omitted.
     col_sep : str
         The separator between columns in the output. (Default: ',')
     row_sep : str
@@ -390,8 +393,9 @@ def to_csv(data, col_sep=",", row_sep="\n", none="NA",
     out = ""
 
     # Add column headers
-    columns = data.dtype.names
-    out += col_sep.join(columns) + row_sep
+    if header:
+        columns = data.dtype.names
+        out += col_sep.join(columns) + row_sep
 
     # Add all data reformatting Nones and certain objects as required
     for row in data:

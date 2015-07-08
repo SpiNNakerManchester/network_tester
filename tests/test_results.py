@@ -557,12 +557,15 @@ def test_to_csv():
 
     # Empty dataset
     assert to_csv(np.zeros((0,), dtype=dt)) == "a,b,c"
+    assert to_csv(np.zeros((0,), dtype=dt), False) == ""
 
     # Standard data types should be handled correctly
     a = np.zeros((2,), dtype=dt)
     assert to_csv(a) == ("a,b,c\n"
                          "0,0.0,0\n"
                          "0,0.0,0")
+    assert to_csv(a, False) == ("0,0.0,0\n"
+                                "0,0.0,0")
 
     # Nones should be printed specially
     a["c"][0] = None
