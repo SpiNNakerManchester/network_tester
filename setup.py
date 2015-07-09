@@ -8,6 +8,7 @@ setup(
     name="network_tester",
     version=__version__,
     packages=find_packages(),
+    package_data={'network_tester': ['binaries/*.aplx']},
 
     # Metadata for PyPi
     url="https://github.com/project-rig/network_tester",
