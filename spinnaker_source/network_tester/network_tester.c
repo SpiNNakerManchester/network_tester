@@ -547,6 +547,7 @@ void c_main(void)
 	uint32_t x = (xy >> 8) | 0xFF;
 	uint32_t y = (xy >> 0) | 0xFF;
 	uint32_t p = spin1_get_core_id();
+	INFO("Starting network_tester on chip %d %d core %d.\n", x, y, p);
 	
 	// Set default parameters
 	to_record = 0x00000000; // Nothing
