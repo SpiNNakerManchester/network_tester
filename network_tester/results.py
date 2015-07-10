@@ -9,6 +9,8 @@ import numpy as np
 
 from numpy.lib.recfunctions import flatten_descr
 
+from network_tester.counters import Counters
+
 from network_tester.errors import NT_ERR
 
 from rig.place_and_route.routing_tree import RoutingTree
@@ -174,13 +176,24 @@ class Results(object):
 
         The output of this method has a field for each recorded metric in
         addition to the standard fields.
+
+        If the number of sent packets is recorded, an additional column,
+        'ideal_received', is added which contains total number of packets which
+        would be received if all sent packets arrived at every sink.
         """
-        totals = self._make_result_array(c.name for c in self._recorded)
+        record_sent = Counters.sent in self._recorded
+        totals = self._make_result_array(
+            [c.name for c in self._recorded] +
+            (["ideal_received"] if record_sent else []))
 
         for vertex, records in iteritems(self._vertices_records):
             results = self._vertices_results[vertex]
             for result_column, (obj, counter) in enumerate(records):
                 totals[counter.name] += results[:, result_column]
+
+                if counter == Counters.sent:
+                    totals["ideal_received"] += \
+                        results[:, result_column] * len(obj.sinks)
 
         return totals
 
@@ -191,12 +204,22 @@ class Results(object):
         In addition to the standard fields, the output of this method has a
         'vertex' field containing the :py:class:`Vertex` object associated with
         each result along with a field for each recorded net-specific metric.
+
+        If the number of sent and received packets is recorded, an additional
+        column, 'ideal_received', is added which contains total number of
+        packets which would be received if all sent packets arrived at every
+        sink.
         """
+        record_sent_receieved = (Counters.sent in self._recorded and
+                                 Counters.received in self._recorded)
+
         num_vertices = len(self._vertices)
         totals = self._make_result_array([("vertex", object)] +
                                          [c.name for c in self._recorded
                                           if c.source_counter
-                                          or c.sink_counter],
+                                          or c.sink_counter] +
+                                         (["ideal_received"] if
+                                          record_sent_receieved else []),
                                          rows_per_sample=num_vertices)
 
         for vertex_num, vertex in enumerate(self._vertices):
@@ -207,6 +230,15 @@ class Results(object):
                 if counter.source_counter or counter.sink_counter:
                     totals[vertex_num::num_vertices][counter.name] += \
                         results[:, result_column]
+
+                    if Counters.received == counter and record_sent_receieved:
+                        src_records = self._vertices_records[obj.source]
+                        src_results = self._vertices_results[obj.source]
+                        src_sent_column = src_records.index(
+                            (obj, Counters.sent))
+
+                        totals[vertex_num::num_vertices]["ideal_received"] += \
+                            src_results[:, src_sent_column]
 
         return totals
 

@@ -411,13 +411,14 @@ def test_totals(example_results, example_groups):
                                   "external_p2p",
                                   "reinjected",
                                   "sent",
-                                  "received")
+                                  "received",
+                                  "ideal_received")
     assert (totals == np.array([("foo", 1234, None, g0,
-                                 1.0, 90, 120, 240, 90, 110),
+                                 1.0, 90, 120, 240, 90, 110, 110),
                                 ("bar", None, 4321, g1,
-                                 0.1, 9, 12, 24, 9, 11),
+                                 0.1, 9, 12, 24, 9, 11, 11),
                                 ("bar", None, 4321, g1,
-                                 0.2, 12, 15, 27, 12, 15)],
+                                 0.2, 12, 15, 27, 12, 15, 15)],
                                dtype=totals.dtype)).all()
 
 
@@ -435,19 +436,20 @@ def test_vertex_totals(example_results, example_groups, example_vertices):
                                   "time",
                                   "vertex",
                                   "sent",
-                                  "received")
-    assert (totals == np.array([("foo", 1234, None, g0, 1.0, v0, 50, 0),
-                                ("foo", 1234, None, g0, 1.0, v1, 0, 30),
-                                ("foo", 1234, None, g0, 1.0, v2, 40, 60),
-                                ("foo", 1234, None, g0, 1.0, v3, 0, 20),
-                                ("bar", None, 4321, g1, 0.1, v0, 5, 0),
-                                ("bar", None, 4321, g1, 0.1, v1, 0, 3),
-                                ("bar", None, 4321, g1, 0.1, v2, 4, 6),
-                                ("bar", None, 4321, g1, 0.1, v3, 0, 2),
-                                ("bar", None, 4321, g1, 0.2, v0, 7, 0),
-                                ("bar", None, 4321, g1, 0.2, v1, 0, 4),
-                                ("bar", None, 4321, g1, 0.2, v2, 5, 8),
-                                ("bar", None, 4321, g1, 0.2, v3, 0, 3)],
+                                  "received",
+                                  "ideal_received")
+    assert (totals == np.array([("foo", 1234, None, g0, 1.0, v0, 50, 0, 0),
+                                ("foo", 1234, None, g0, 1.0, v1, 0, 30, 30),
+                                ("foo", 1234, None, g0, 1.0, v2, 40, 60, 60),
+                                ("foo", 1234, None, g0, 1.0, v3, 0, 20, 20),
+                                ("bar", None, 4321, g1, 0.1, v0, 5, 0, 0),
+                                ("bar", None, 4321, g1, 0.1, v1, 0, 3, 3),
+                                ("bar", None, 4321, g1, 0.1, v2, 4, 6, 6),
+                                ("bar", None, 4321, g1, 0.1, v3, 0, 2, 2),
+                                ("bar", None, 4321, g1, 0.2, v0, 7, 0, 0),
+                                ("bar", None, 4321, g1, 0.2, v1, 0, 4, 4),
+                                ("bar", None, 4321, g1, 0.2, v2, 5, 8, 8),
+                                ("bar", None, 4321, g1, 0.2, v3, 0, 3, 3)],
                                dtype=totals.dtype)).all()
 
 
