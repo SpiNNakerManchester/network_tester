@@ -222,12 +222,25 @@ void set_num_sinks(size_t new_num_sinks) {
  */
 void on_mc_packet(uint key, uint payload)
 {
-	uint32_t count = key & 0xFF;
 	key &= ~0xFF;
 	
-	for (int i = 0; i < num_sinks; i++)
-		if (sinks[i].key == key)
-			sinks[i].arrived_count++;
+	int left = 0;
+	int right = num_sinks - 1;
+	int middle = (left + right) / 2;
+	
+	while (left <= right) {
+		uint32_t cur_key = sinks[middle].key;
+		if (key < cur_key) {
+			right = middle - 1;
+		} else if (key > cur_key) {
+			left = middle + 1;
+		} else {
+			sinks[middle].arrived_count++;
+			return;
+		}
+		
+		middle = (left + right) / 2;
+	}
 }
 
 
