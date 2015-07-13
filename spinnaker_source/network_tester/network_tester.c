@@ -29,6 +29,7 @@ static uint32_t to_record;
 
 #define RECORD_SENT_BIT (1u << 24)
 #define RECORD_BLOCKED_BIT (1u << 25)
+#define RECORD_RETRY_BIT (1u << 26)
 #define RECORD_RECEIVED_BIT (1u << 28)
 
 // The maximum number of values which can be recorded simultaneously (used to
@@ -138,10 +139,13 @@ void set_num_sources(size_t new_num_sources) {
 		new_sources[i].burst_period_steps = 0; // Not bursty
 		new_sources[i].burst_duty_steps = 0; // No ticks on
 		new_sources[i].burst_phase_steps = 0; // Default: all aligned
+		new_sources[i].num_retries = 0; // Give up after being blocked
+		new_sources[i].num_packets = 1; // One packet per time-step
 		new_sources[i].probability = 0x00000000; // 0%
 		new_sources[i].payload = false;
 		new_sources[i].sent_count = 0;
 		new_sources[i].blocked_count = 0;
+		new_sources[i].retry_count = 0;
 	}
 	
 	// Copy-across all previous sources which remain
@@ -263,19 +267,24 @@ void record(bool first)
 		}
 	}
 	
-	// Record source/sink counters
+	// Record source counters
 	if (to_record & RECORD_SENT_BIT)
 		for (int source = 0; source < num_sources; source++)
 			APPEND_RESULT(sources[source].sent_count);
 	if (to_record & RECORD_BLOCKED_BIT)
 		for (int source = 0; source < num_sources; source++)
 			APPEND_RESULT(sources[source].blocked_count);
+	if (to_record & RECORD_RETRY_BIT)
+		for (int source = 0; source < num_sources; source++)
+			APPEND_RESULT(sources[source].retry_count);
+	
+	// Record sink counters
 	if (to_record & RECORD_RECEIVED_BIT)
 		for (int sink = 0; sink < num_sinks; sink++)
 			APPEND_RESULT(sinks[sink].arrived_count);
 	
+	// DMA the results into SDRAM
 	if (!first && num_results > 0) {
-		// DMA the results into SDRAM
 		if (!spin1_dma_transfer(DMA_WRITE, sdram_next_results, recorded_value_buffer, DMA_WRITE,
 		                        num_results * sizeof(uint32_t))) {
 			ERROR("DMA transfer of %d bytes failed.\n", num_results * sizeof(uint32_t));
@@ -312,7 +321,7 @@ uint32_t run(uint32_t time_left_steps)
 	
 	// Generate traffic in a busy loop to maximise timing accuracy
 	while (time_left_steps != 0) {
-		// Wait until a timestep has ellapsed. (Note that tc2 is a down-counter).
+		// Wait until a timestep has elapsed. (Note that tc2 is a down-counter).
 		int32_t time_ticks = (int32_t)tc2[TC_COUNT];
 		if (time_ticks - next_timestep_ticks > 0)
 			continue;
@@ -334,18 +343,28 @@ uint32_t run(uint32_t time_left_steps)
 				burst = true;
 			}
 			
-			// Generate packets for each packet source
+			// (Probabilistically) Generate several packets
 			if (burst) {
-				bool generate = (sources[i].probability == 0xFFFFFFFFu)
-				              || (sark_rand() < sources[i].probability);
-				
-				if (generate) {
-					bool sent = spin1_send_mc_packet(sources[i].key, 0xDEADBEEF,
-					                                 sources[i].payload);
-					if (sent)
-						sources[i].sent_count++;
-					else
-						sources[i].blocked_count++;
+				for (int j = 0; j < sources[i].num_packets; j++) {
+					bool generate = (sources[i].probability == 0xFFFFFFFFu)
+					                || (sark_rand() < sources[i].probability);
+					
+					if (generate) {
+						bool sent;
+						// Retry on back-pressure blocking transmission, if required
+						for (int k = 0; k <= sources[i].num_retries; k++) {
+							sent = spin1_send_mc_packet(sources[i].key, 0xDEADBEEF,
+							                            sources[i].payload);
+							if (k != 0)
+								sources[i].retry_count++;
+							if (sent)
+								break;
+						}
+						if (sent)
+							sources[i].sent_count++;
+						else
+							sources[i].blocked_count++;
+					}
 				}
 			}
 		}
@@ -509,6 +528,24 @@ void interpreter_main(uint commands_ptr, uint arg1)
 			case NT_CMD_NO_PAYLOAD:
 				if (num < num_sources) {
 					sources[num].payload = false;
+				} else {
+					ERROR("Source %d does not exist.\n", num);
+					error_occurred |= NT_ERR_BAD_ARGUMENTS;
+				}
+				break;
+			
+			case NT_CMD_NUM_RETRIES:
+				if (num < num_sources) {
+					sources[num].num_retries = *(commands++);
+				} else {
+					ERROR("Source %d does not exist.\n", num);
+					error_occurred |= NT_ERR_BAD_ARGUMENTS;
+				}
+				break;
+			
+			case NT_CMD_NUM_PACKETS:
+				if (num < num_sources) {
+					sources[num].num_packets = *(commands++);
 				} else {
 					ERROR("Source %d does not exist.\n", num);
 					error_occurred |= NT_ERR_BAD_ARGUMENTS;

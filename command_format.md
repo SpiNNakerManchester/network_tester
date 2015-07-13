@@ -150,7 +150,8 @@ Enable or disable the recording of particular values during a run.
 * `cnt[18]` Number of times the router reported more than one packet being
             dropped before the reinjector could pick it up.
 * `cnt[24]` number of sent packets
-* `cnt[25]` number of blocked packets (e.g. not sent due to back-pressure)
+* `cnt[25]` number of blocked packets (i.e. not sent due to back-pressure)
+* `cnt[26]` number of send re-attepts (i.e. when blocked by back-pressure)
 * `cnt[28]` number of received MC packets
 
 ### 0x11: `NT_CMD_RECORD_INTERVAL`
@@ -251,6 +252,30 @@ source indicated by bits 15:8 of the command word.
 
 Disables the sending of MC packets with payloads for generated packets for the
 source indicated by bits 15:8 of the command word.
+
+### 0x27: `NT_CMD_NUM_RETRIES`
+
+    +------------------+------------------+
+    | 0x27 | src<<8    | retries          |
+    +------------------+------------------+
+          1 word             1 word
+
+Specifies the number of retries to be made when sending a packet results in
+buffer-full for the source indicated by bits 15:8 of the command word. Zero is
+the default and means the packet is counted as blocked after one failed
+attepmt.
+
+### 0x28: `NT_CMD_NUM_PACKETS`
+
+    +------------------+------------------+
+    | 0x28 | src<<8    | num_packets      |
+    +------------------+------------------+
+          1 word             1 word
+
+Specifies the number of packets to send each timestep for the source indicated
+by bits 15:8 of the command word. Each of the `num_packets` will be sent
+independedntly in immediate succession with the specified probability. The
+default is 1.
 
 
 Packet consumption commands

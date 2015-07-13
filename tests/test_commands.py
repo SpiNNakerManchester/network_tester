@@ -400,6 +400,58 @@ def test_payload():
     assert a._commands[-1] == NT_CMD.NO_PAYLOAD | (1 << 8)
 
 
+def test_num_retries():
+    # Make sure the number of retries can be changed.
+    a = Commands()
+
+    a.num(2, 0)
+    assert len(a._commands) == 2
+
+    # If not changed, shouldn't produce any commands
+    a.num_retries(0, 0)
+    a.num_retries(1, 0)
+    assert len(a._commands) == 2
+
+    # Should produce a command when changed
+    a.num_retries(0, 100)
+    assert len(a._commands) == 4
+    assert a._commands[-2:] == [NT_CMD.NUM_RETRIES | (0 << 8), 100]
+    a.num_retries(1, 100)
+    assert len(a._commands) == 6
+    assert a._commands[-2:] == [NT_CMD.NUM_RETRIES | (1 << 8), 100]
+
+    # No command should be produced on another non-change
+    a.num_retries(0, 100)
+    a.num_retries(1, 100)
+    assert len(a._commands) == 6
+
+
+def test_num_packets():
+    # Make sure the number of packets can be changed.
+    a = Commands()
+
+    a.num(2, 0)
+    assert len(a._commands) == 2
+
+    # If not changed, shouldn't produce any commands
+    a.num_packets(0, 1)
+    a.num_packets(1, 1)
+    assert len(a._commands) == 2
+
+    # Should produce a command when changed
+    a.num_packets(0, 10)
+    assert len(a._commands) == 4
+    assert a._commands[-2:] == [NT_CMD.NUM_PACKETS | (0 << 8), 10]
+    a.num_packets(1, 10)
+    assert len(a._commands) == 6
+    assert a._commands[-2:] == [NT_CMD.NUM_PACKETS | (1 << 8), 10]
+
+    # No command should be produced on another non-change
+    a.num_packets(0, 10)
+    a.num_packets(1, 10)
+    assert len(a._commands) == 6
+
+
 def test_consume():
     # Make sure the consumption mode can be changed.
     a = Commands()

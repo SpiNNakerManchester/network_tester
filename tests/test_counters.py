@@ -22,7 +22,7 @@ def test_counters_classes():
     reinjector_counters = set([Counters.reinjected,
                                Counters.reinject_overflow,
                                Counters.reinject_missed])
-    source_counters = set([Counters.sent, Counters.blocked])
+    source_counters = set([Counters.sent, Counters.blocked, Counters.retried])
     sink_counters = set([Counters.received])
 
     for counter in Counters:

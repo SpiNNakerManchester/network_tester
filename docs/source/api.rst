@@ -199,6 +199,26 @@ For example::
     according to :py:attr:`~Net.probability` since bursting behaviour is not
     enabled.
 
+.. attribute:: Net.packets_per_timestep
+               Vertex.packets_per_timestep
+               Experiment.packets_per_timestep
+
+    The number of packets to generate each timestep. 
+    
+    Default value: 1 (Generate a single packet every timestep.)
+   
+    The probability of each packet being generated is independent and set to
+    :py:attr:`Net.probability`. 
+
+.. attribute:: Net.num_retries
+               Vertex.num_retries
+               Experiment.num_retries
+
+    Number of times to re-try sending a packet if back-pressure from the
+    network blocks it.
+    
+    Default value: 0 (Give up immediately when faced with back-pressure)
+
 .. attribute:: Net.burst_period
                Net.burst_duty
                Net.burst_phase

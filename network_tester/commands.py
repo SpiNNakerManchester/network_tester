@@ -33,6 +33,8 @@ class NT_CMD(IntEnum):
     SOURCE_KEY = 0x24
     PAYLOAD = 0x25
     NO_PAYLOAD = 0x26
+    NUM_RETRIES = 0x27
+    NUM_PACKETS = 0x28
 
     CONSUME = 0x30
     NO_CONSUME = 0x31
@@ -87,6 +89,13 @@ class Commands(object):
         # A list of bools indicating whether a payload should be included with
         # generated packets, one for each source
         self._payload = None
+
+        # A list of integers giving the number of retries to be made for each
+        # transmission
+        self._num_retries = None
+
+        # A list of integers giving the number of packets to send per timestep
+        self._num_packets = None
 
         # A bool indicating whether packets should be consumed or not
         self._consume = True
@@ -204,6 +213,8 @@ class Commands(object):
         self._probability = [0.0] * num_sources
         self._source_key = [0] * num_sources
         self._payload = [False] * num_sources
+        self._num_retries = [0] * num_sources
+        self._num_packets = [1] * num_sources
 
         self._sink_key = [0] * num_sinks
 
@@ -388,6 +399,28 @@ class Commands(object):
             self._payload[source_num] = payload
             self._commands.append((NT_CMD.PAYLOAD if payload else
                                    NT_CMD.NO_PAYLOAD) | (source_num << 8))
+
+    def num_retries(self, source_num, num_retries):
+        """Specify how many retries should be made when sending is blocked."""
+        assert not self._exited
+        assert source_num < self._num_sources
+
+        # Only output if changed
+        if self._num_retries[source_num] != num_retries:
+            self._num_retries[source_num] = num_retries
+            self._commands.extend([NT_CMD.NUM_RETRIES | (source_num << 8),
+                                   num_retries])
+
+    def num_packets(self, source_num, num_packets):
+        """Specify how many packets should be sent per timestep."""
+        assert not self._exited
+        assert source_num < self._num_sources
+
+        # Only output if changed
+        if self._num_packets[source_num] != num_packets:
+            self._num_packets[source_num] = num_packets
+            self._commands.extend([NT_CMD.NUM_PACKETS | (source_num << 8),
+                                   num_packets])
 
     def consume(self, consume):
         """Select whether packets are consumed or left in the network."""

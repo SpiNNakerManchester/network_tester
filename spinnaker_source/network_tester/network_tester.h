@@ -56,6 +56,8 @@
 #define NT_CMD_SOURCE_KEY 0x24
 #define NT_CMD_PAYLOAD 0x25
 #define NT_CMD_NO_PAYLOAD 0x26
+#define NT_CMD_NUM_RETRIES 0x27
+#define NT_CMD_NUM_PACKETS 0x28
 
 #define NT_CMD_CONSUME 0x30
 #define NT_CMD_NO_CONSUME 0x31
@@ -84,6 +86,13 @@ typedef struct {
 	uint32_t burst_duty_steps;
 	uint32_t burst_phase_steps;
 	
+	// Number of times in a row to try sending a packet before giving up.
+	uint32_t num_retries;
+	
+	// Number of packets to send each timestep (each with the probability
+	// indicated below).
+	uint32_t num_packets;
+	
 	// Probability of a packet being injection each timestep. Probability is scaled
 	// by (1<<32) with 0xFFFFFFFF being special-cased as "1".
 	uint32_t probability;
@@ -97,6 +106,10 @@ typedef struct {
 	// Count of packets which were attempted to be sent but which were blocked by
 	// back-pressure from the network.
 	uint32_t blocked_count;
+	
+	// Number of repeat-attempts at sending a packet blocked by back-pressure
+	// from the network.
+	uint32_t retry_count;
 } source_t;
 
 /**

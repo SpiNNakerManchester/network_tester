@@ -36,6 +36,7 @@ class Counters(IntEnum):
     # Source counters
     sent = 1 << 24
     blocked = 1 << 25
+    retried = 1 << 26
 
     # Sink counters
     received = 1 << 28

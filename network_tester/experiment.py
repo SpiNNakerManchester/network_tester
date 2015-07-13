@@ -136,6 +136,8 @@ class Experiment(object):
             "flush_time": {(None, None): 0.01},
             "record_interval": {(None, None): 0.0},
             "probability": {(None, None): 1.0},
+            "packets_per_timestep": {(None, None): 1},
+            "num_retries": {(None, None): 0},
             "burst_period": {(None, None): 0.0},
             "burst_duty": {(None, None): 0.0},
             "burst_phase": {(None, None): 0.0},
@@ -389,6 +391,10 @@ class Experiment(object):
             vertices_source_nets[net.source].append(net)
             for sink in net.sinks:
                 vertices_sink_nets[sink].append(net)
+        # Sort all sink lists by key to allow binary-searching in the
+        # network_tester application
+        for sink_nets in itervalues(vertices_sink_nets):
+            sink_nets.sort(key=(lambda n: net_keys[n]))
 
         vertices_records = self._get_vertex_record_lookup(
             vertices, router_access_vertices, placements,
@@ -468,7 +474,10 @@ class Experiment(object):
                 # Reach the barrier before the run starts
                 logger.info("Waiting for barrier...")
                 num_at_barrier = self._mc.wait_for_cores_to_reach_state(
-                    next_barrier, len(vertices), timeout=2.0)
+                    next_barrier, len(vertices), timeout=10.0)
+                if num_at_barrier != len(vertices):
+                    print(num_at_barrier, len(vertices))
+                    input(">>>")
                 assert num_at_barrier == len(vertices), \
                     "Not all cores reached the barrier " \
                     "before {}.".format(group)
@@ -765,9 +774,14 @@ class Experiment(object):
                     self._get_option_value("burst_phase", group, source_net))
                 commands.probability(
                     source_num,
-                    self._get_option_value("probability",
-                                           group,
-                                           source_net))
+                    self._get_option_value("probability", group, source_net))
+                commands.num_retries(
+                    source_num,
+                    self._get_option_value("num_retries", group, source_net))
+                commands.num_packets(
+                    source_num,
+                    self._get_option_value("packets_per_timestep",
+                                           group, source_net))
                 commands.payload(
                     source_num,
                     self._get_option_value("use_payload",
@@ -1034,6 +1048,7 @@ class Experiment(object):
 
     record_sent = _Option("record_sent")
     record_blocked = _Option("record_blocked")
+    record_retried = _Option("record_retried")
     record_received = _Option("record_received")
 
     record_interval = _Option("record_interval")
@@ -1043,7 +1058,8 @@ class Experiment(object):
     burst_phase = _Option("burst_phase")
 
     probability = _Option("probability")
-
+    num_retries = _Option("num_retries")
+    packets_per_timestep = _Option("packets_per_timestep")
     use_payload = _Option("use_payload")
 
     consume_packets = _Option("consume_packets")
@@ -1088,6 +1104,8 @@ class Vertex(object):
     burst_phase = _Option("burst_phase")
 
     probability = _Option("probability")
+    num_retries = _Option("num_retries")
+    packets_per_timestep = _Option("packets_per_timestep")
 
     use_payload = _Option("use_payload")
 
@@ -1131,6 +1149,8 @@ class Net(RigNet):
     burst_phase = _Option("burst_phase")
 
     probability = _Option("probability")
+    num_retries = _Option("num_retries")
+    packets_per_timestep = _Option("packets_per_timestep")
 
     use_payload = _Option("use_payload")
 
