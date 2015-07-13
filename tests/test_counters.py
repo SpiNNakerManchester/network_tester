@@ -3,6 +3,7 @@ from network_tester.counters import Counters
 
 def test_counters_classes():
     # Make sure each of the counter types is identified correctly
+    permanent_counters = set([Counters.deadlines_missed])
     router_counters = set([Counters.local_multicast,
                            Counters.external_multicast,
                            Counters.local_p2p,
@@ -26,22 +27,32 @@ def test_counters_classes():
     sink_counters = set([Counters.received])
 
     for counter in Counters:
-        if counter in router_counters:
+        if counter in permanent_counters:
+            assert counter.permanent_counter
+            assert not counter.router_counter
+            assert not counter.reinjector_counter
+            assert not counter.source_counter
+            assert not counter.sink_counter
+        elif counter in router_counters:
+            assert not counter.permanent_counter
             assert counter.router_counter
             assert not counter.reinjector_counter
             assert not counter.source_counter
             assert not counter.sink_counter
         elif counter in reinjector_counters:
+            assert not counter.permanent_counter
             assert not counter.router_counter
             assert counter.reinjector_counter
             assert not counter.source_counter
             assert not counter.sink_counter
         elif counter in source_counters:
+            assert not counter.permanent_counter
             assert not counter.router_counter
             assert not counter.reinjector_counter
             assert counter.source_counter
             assert not counter.sink_counter
         elif counter in sink_counters:
+            assert not counter.permanent_counter
             assert not counter.router_counter
             assert not counter.reinjector_counter
             assert not counter.source_counter

@@ -664,7 +664,7 @@ def test_construct_vertex_commands(router_access_vertex):
             source_nets=vertices_source_nets[vertex],
             sink_nets=vertices_sink_nets[vertex],
             net_keys=net_keys,
-            records=[Counters.sent],
+            records=[Counters.deadlines_missed, Counters.sent],
             router_access_vertex=router_access_vertex).pack()
         for vertex in vertices
     }
@@ -794,12 +794,13 @@ def test_get_vertex_record_lookup():
     vertices_source_nets = {vertex0: [net0, net1], vertex1: []}
     vertices_sink_nets = {vertex0: [net0], vertex1: [net1]}
 
-    # If nothing is being recorded, the sets should be empty.
+    # If nothing is being recorded, the sets should just contain permanent
+    # counters
     vertices_records = e._get_vertex_record_lookup(
         vertices, set(), placements, vertices_source_nets, vertices_sink_nets)
     assert vertices_records == {
-        vertex0: [],
-        vertex1: [],
+        vertex0: [(vertex0, Counters.deadlines_missed)],
+        vertex1: [(vertex1, Counters.deadlines_missed)],
     }
 
     # If only vertex counters are being used, they should be included
@@ -808,9 +809,11 @@ def test_get_vertex_record_lookup():
     vertices_records = e._get_vertex_record_lookup(
         vertices, set(), placements, vertices_source_nets, vertices_sink_nets)
     assert vertices_records == {
-        vertex0: [(net0, Counters.sent), (net1, Counters.sent),
+        vertex0: [(vertex0, Counters.deadlines_missed),
+                  (net0, Counters.sent), (net1, Counters.sent),
                   (net0, Counters.received)],
-        vertex1: [(net1, Counters.received)],
+        vertex1: [(vertex1, Counters.deadlines_missed),
+                  (net1, Counters.received)],
     }
 
     # If any routing table entries are present, they should be added to
@@ -824,10 +827,12 @@ def test_get_vertex_record_lookup():
         vertices_source_nets,
         vertices_sink_nets)
     assert vertices_records == {
-        vertex0: [((0, 0), Counters.external_multicast),
+        vertex0: [(vertex0, Counters.deadlines_missed),
+                  ((0, 0), Counters.external_multicast),
                   (net0, Counters.sent), (net1, Counters.sent),
                   (net0, Counters.received)],
-        vertex1: [(net1, Counters.received)],
+        vertex1: [(vertex1, Counters.deadlines_missed),
+                  (net1, Counters.received)],
     }
 
 
@@ -942,11 +947,13 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
     for x, vertex in enumerate(vertices):
         cmds_size = vertices_commands[vertex].size
         if record:
-            # The space required to record the sent counters.
-            result_size = (1 + (num_nets_per_vertex *
+            # The space required to record deadlines_missed and the sent
+            # counters.
+            result_size = (1 + ((1 + num_nets_per_vertex) *
                                 sum(samples_per_group))) * 4
         else:
-            result_size = 4  # Just the status value
+            # Just the status value and deadlines_missed
+            result_size = (1 + sum(samples_per_group)) * 4
         size = max(cmds_size, result_size)
         if reinject_packets:
             # During packet reinjection, core 1 is used.

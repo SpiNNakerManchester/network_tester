@@ -125,7 +125,11 @@ def test_run():
     a = Commands()
     a.timestep(1e-9)
     a.run(1e-6)
-    assert a._commands[2:] == [NT_CMD.RUN, 1000]
+    assert len(a._commands) == 4
+    assert a._commands[-2:] == [NT_CMD.RUN, 1000]
+    a.run(1e-7, False)
+    assert len(a._commands) == 6
+    assert a._commands[-2:] == [NT_CMD.RUN_NO_RECORD, 100]
 
 
 def test_num():

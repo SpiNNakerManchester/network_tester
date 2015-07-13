@@ -56,14 +56,10 @@ def test_router_recording(experiment):
     assert len(chip_coordinates) > 1
     assert len(router_counters) == len(chip_coordinates) * 100
 
-    # Only nearest neighbour packets should be sent during the run (due to
-    # SARK)
     assert np.sum(router_counters["local_multicast"]) == 0
     assert np.sum(router_counters["external_multicast"]) == 0
     assert np.sum(router_counters["local_p2p"]) == 0
     assert np.sum(router_counters["external_p2p"]) == 0
-    assert np.sum(router_counters["local_nearest_neighbour"]) > 0
-    assert np.sum(router_counters["external_nearest_neighbour"]) > 0
     assert np.sum(router_counters["local_fixed_route"]) == 0
     assert np.sum(router_counters["external_fixed_route"]) == 0
     assert np.sum(router_counters["dropped_multicast"]) == 0
@@ -144,7 +140,7 @@ def test_transmission(experiment):
 
 
 def test_recipt(experiment):
-    """In this experiment we simply check that multple arriving streams can be
+    """In this experiment we simply check that multiple arriving streams can be
     differentiated."""
 
     experiment.timestep = 1e-4  # 100us
@@ -236,5 +232,10 @@ def test_impossible_deadline(experiment):
         experiment.run()
     assert "deadline" in str(exc_info.value).lower()
 
+    totals = exc_info.value.results.totals()
+
     # All packets should still have been sent
-    assert exc_info.value.results.totals()["sent"] == 10
+    assert totals["sent"] == 10
+    
+    # But deadline misses should have been counted
+    assert totals["deadlines_missed"] > 0

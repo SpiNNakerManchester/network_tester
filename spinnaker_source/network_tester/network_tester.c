@@ -73,8 +73,12 @@ static uint old_router_timeout;
 // value of these counters is undefined.
 reinjector_counters_t *reinjector_counters;
 
+// Is a DMA operation currently in progress
+static volatile bool dma_in_progress = false;
+
 // The number of recording counters which exist for each router, source and
 // sink.
+#define NUM_PERMANENT_COUNTERS 1
 #define NUM_ROUTER_COUNTERS 16
 #define NUM_REINJECTOR_COUNTERS (sizeof(reinjector_counters_t) / sizeof(uint))
 #define NUM_SOURCE_COUNTERS 3
@@ -83,6 +87,7 @@ reinjector_counters_t *reinjector_counters;
 // Given a number of sinks and a number of sources, gives the maximum number of
 // result counters which may exist.
 #define MAX_NUM_RESULTS(num_sources, num_sinks) ( \
+	NUM_PERMANENT_COUNTERS + \
 	NUM_ROUTER_COUNTERS + \
 	NUM_REINJECTOR_COUNTERS + \
 	(NUM_SOURCE_COUNTERS * (num_sources)) + \
@@ -210,10 +215,21 @@ void set_num_sinks(size_t new_num_sinks) {
 	sinks = new_sinks;
 	num_sinks = new_num_sinks;
 	
+	while (dma_in_progress)
+		;
 	sark_free(last_recorded);
 	last_recorded = new_last_recorded;
 	sark_free(recorded_value_buffer);
 	recorded_value_buffer = new_recorded_value_buffer;
+}
+
+
+/**
+ * Callback on DMA completion.
+ */
+void on_dma_transfer_done(uint arg1, uint arg2)
+{
+	dma_in_progress = false;
 }
 
 
@@ -252,8 +268,12 @@ void on_mc_packet(uint key, uint payload)
  * true at the start of each run, otherwise the recorded values will be
  * invalid.
  */
-void record(bool first)
+void record(bool first, uint32_t deadlines_missed)
 {
+	// Wait for any ongoing DMAs to complete
+	while (dma_in_progress)
+		;
+	
 	int num_results = 0;
 	
 	#define APPEND_RESULT(value) do { \
@@ -263,6 +283,10 @@ void record(bool first)
 			last_recorded[num_results] = (value); \
 			num_results++; \
 	} while (0)
+	
+	// Record the number of realtime deadlines missed
+	APPEND_RESULT(deadlines_missed);
+	//recorded_value_buffer[0] = 1234; // XXX
 	
 	// Record router counters.
 	for (int counter = 0; counter < NUM_ROUTER_COUNTERS; counter++) {
@@ -298,10 +322,13 @@ void record(bool first)
 	
 	// DMA the results into SDRAM
 	if (!first && num_results > 0) {
+		DEBUG("Copying %d results into SDRAM\n", num_results);
+		dma_in_progress = true;
 		if (!spin1_dma_transfer(DMA_WRITE, sdram_next_results, recorded_value_buffer, DMA_WRITE,
 		                        num_results * sizeof(uint32_t))) {
 			ERROR("DMA transfer of %d bytes failed.\n", num_results * sizeof(uint32_t));
 			error_occurred |= NT_ERR_DMA;
+			dma_in_progress = false;
 		}
 		
 		// Advance the SDRAM pointer to the next free space
@@ -317,7 +344,7 @@ void record(bool first)
  *
  * Returns error code if a timing deadline was missed or false otherwise.
  */
-uint32_t run(uint32_t time_left_steps)
+uint32_t run(uint32_t time_left_steps, bool enable_recording)
 {
 	// The number of timing deadlines missed
 	uint32_t deadlines_missed = 0;
@@ -330,7 +357,8 @@ uint32_t run(uint32_t time_left_steps)
 	uint32_t record_elapsed_steps = 0;
 	
 	// Take an initial sample of any counters being recorded
-	record(true);
+	if (enable_recording)
+		record(true, deadlines_missed);
 	
 	// Generate traffic in a busy loop to maximise timing accuracy
 	while (time_left_steps != 0) {
@@ -383,17 +411,18 @@ uint32_t run(uint32_t time_left_steps)
 		}
 		
 		// If the recording interval has elapsed, record the state of the network.
-		if (record_interval_steps > 0
+		if (enable_recording
+		    && record_interval_steps > 0
 		    && ++record_elapsed_steps >= record_interval_steps) {
 			record_elapsed_steps = 0;
-			record(false);
+			record(false, deadlines_missed);
 		}
 	}
 	
 	// If only recording a single sample for the whole run (record_interval_steps
 	// == 0), take a final recording now.
-	if (record_interval_steps == 0)
-		record(false);
+	if (enable_recording && record_interval_steps == 0)
+		record(false, deadlines_missed);
 	
 	uint32_t errors = (deadlines_missed ? NT_ERR_DEADLINE_MISSED : 0) |
 	                  (deadlines_missed > (num_steps / 2)
@@ -457,8 +486,14 @@ void interpreter_main(uint commands_ptr, uint arg1)
 				break;
 			
 			case NT_CMD_RUN:
-				if (run(*(commands++))) {
+				if (run(*(commands++), true)) {
 					ERROR("Timing deadline(s) missed during run\n");
+				}
+				break;
+			
+			case NT_CMD_RUN_NO_RECORD:
+				if (run(*(commands++), false)) {
+					ERROR("Timing deadline(s) missed during non-recording run\n");
 				}
 				break;
 			
@@ -611,6 +646,10 @@ void c_main(void)
 	// Accept MC packets
 	spin1_callback_on(MC_PACKET_RECEIVED, on_mc_packet, -1);
 	spin1_callback_on(MCPL_PACKET_RECEIVED, on_mc_packet, -1);
+	
+	// Monitor DMA completion
+	spin1_callback_on(DMA_TRANSFER_DONE, on_dma_transfer_done, 0);
+	dma_in_progress = false;
 	
 	// Allocate space for storing results (this may be reallocated later)
 	last_recorded = sark_alloc(

@@ -22,6 +22,7 @@ class NT_CMD(IntEnum):
     ROUTER_TIMEOUT_RESTORE = 0x08
     REINJECTION_ENABLE = 0x09
     REINJECTION_DISABLE = 0x0A
+    RUN_NO_RECORD = 0x0B
 
     RECORD = 0x10
     RECORD_INTERVAL = 0x11
@@ -185,13 +186,15 @@ class Commands(object):
                                self._current_burst_duty[source_num],
                                self._current_burst_phase[source_num])
 
-    def run(self, duration):
-        """Run the generator for a given number of seconds."""
+    def run(self, duration, record=True):
+        """Run the generator for a given number of seconds, optionally while
+        recording data."""
         assert not self._exited
         # Convert to timesteps (round to soften the blow of floating point
         # precision issues)
         duration = int(round(duration / self._current_timestep))
-        self._commands.extend([NT_CMD.RUN, duration])
+        self._commands.extend([NT_CMD.RUN if record else NT_CMD.RUN_NO_RECORD,
+                               duration])
 
     def num(self, num_sources, num_sinks):
         """Specify the number of sources and sinks.

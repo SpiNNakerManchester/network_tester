@@ -129,6 +129,16 @@ Disable packet reinjection. This command simply disables the router packet
 dropped interrupt on the local router. The packet reinjector application on
 this chip is then free to drain its packet buffer at its leisure.
 
+### 0x0B: `NT_CMD_RUN_NO_RECORD`
+
+    +------------------+------------------+
+    | 0x0B             | steps            |
+    +------------------+------------------+
+          1 word             1 word
+
+Run the traffic generator for the specified number of timesteps without
+recording any results.
+
 
 Result recording commands
 -------------------------

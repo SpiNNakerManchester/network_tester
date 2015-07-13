@@ -9,6 +9,9 @@ class Counters(IntEnum):
     Each counter's numerical value is equal to the corresponding bit in the
     NT_CMD_RECORD command.
     """
+    # Always-recorded values (note, these have a unique but non-maskable
+    # integer value.
+    deadlines_missed = -1
 
     # Router counters
     local_multicast = 1 << 0
@@ -42,9 +45,14 @@ class Counters(IntEnum):
     received = 1 << 28
 
     @property
+    def permanent_counter(self):
+        """True if this counter is always enabled."""
+        return self < 0
+
+    @property
     def router_counter(self):
         """True if a router counter."""
-        return self <= (1 << 15)
+        return (1 << 0) <= self <= (1 << 15)
 
     @property
     def reinjector_counter(self):

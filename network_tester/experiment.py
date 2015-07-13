@@ -149,7 +149,8 @@ class Experiment(object):
 
         # All counters are global-only options and default to False.
         for counter in Counters:
-            self._values["record_{}".format(counter.name)] = False
+            if not counter.permanent_counter:
+                self._values["record_{}".format(counter.name)] = False
 
     def new_vertex(self, name=None):
         """Create a new :py:class:`Vertex`.
@@ -475,9 +476,6 @@ class Experiment(object):
                 logger.info("Waiting for barrier...")
                 num_at_barrier = self._mc.wait_for_cores_to_reach_state(
                     next_barrier, len(vertices), timeout=10.0)
-                if num_at_barrier != len(vertices):
-                    print(num_at_barrier, len(vertices))
-                    input(">>>")
                 assert num_at_barrier == len(vertices), \
                     "Not all cores reached the barrier " \
                     "before {}.".format(group)
@@ -808,18 +806,17 @@ class Experiment(object):
                 else:
                     commands.router_timeout(*router_timeout)
 
-            # warming up without recording data
-            commands.record()
-            commands.run(self._get_option_value("warmup", group))
+            # Warm up without recording data
+            commands.run(self._get_option_value("warmup", group), False)
 
-            # Run the actual experiment and record results
-            commands.record(*records)
+            # Run the actual experiment and record results (flags are removed
+            # for permanent counters since they cannot be not-recorded).
+            commands.record(*(c for c in records if not c.permanent_counter))
             commands.run(self._get_option_value("duration", group))
 
-            # Run without recording (briefly) after the experiment to allow
-            # for clock skew between cores.
-            commands.record()  # Record nothing during cooldown
-            commands.run(self._get_option_value("cooldown", group))
+            # Run without recording (briefly) after the experiment to allow for
+            # clock skew between cores. Record nothing during cooldown.
+            commands.run(self._get_option_value("cooldown", group), False)
 
             # Restore router timeout, turn consumption back on and reinjection
             # back off after the run
@@ -930,7 +927,8 @@ class Experiment(object):
         # {vertex, [counter, ...]}
         vertices_records = {}
         for vertex in vertices:
-            records = []
+            # Start with the permanently-recorded set of counters
+            records = [(vertex, c) for c in Counters if c.permanent_counter]
 
             # Add any router-counters if this vertex is recording them
             if vertex in router_access_vertices:
