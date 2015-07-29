@@ -476,9 +476,6 @@ class Experiment(object):
                 logger.info("Waiting for barrier...")
                 num_at_barrier = self._mc.wait_for_cores_to_reach_state(
                     next_barrier, len(vertices), timeout=10.0)
-                if num_at_barrier != len(vertices):
-                    print(num_at_barrier, len(vertices))
-                    input(">>>")
                 assert num_at_barrier == len(vertices), \
                     "Not all cores reached the barrier " \
                     "before {}.".format(group)
@@ -503,9 +500,6 @@ class Experiment(object):
             logger.info("Waiting for barrier...")
             num_at_barrier = self._mc.wait_for_cores_to_reach_state(
                 "exit", len(vertices), timeout=10.0)
-            if num_at_barrier != len(vertices):
-                print(num_at_barrier, len(vertices))
-                input(">>>")
             assert num_at_barrier == len(vertices), \
                 "Not all cores reached the final barrier."
 
