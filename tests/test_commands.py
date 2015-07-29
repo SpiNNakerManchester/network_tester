@@ -135,8 +135,8 @@ def test_run():
 def test_num():
     # Make sure setting number of sources and sinks works correctly
     a = Commands()
-    a.num(0xAA, 0xBB)
-    assert a._commands == [NT_CMD.NUM, 0xBBAA]
+    a.num(0xAAAA, 0xBBBB)
+    assert a._commands == [NT_CMD.NUM, 0xBBBBAAAA]
 
     # Should not be able to change
     with pytest.raises(Exception):

@@ -83,8 +83,8 @@ Run the traffic generator for the specified number of timesteps.
           1 word             1 word
 
 Specify the number of traffic sources and sinks this traffic generator should
-impelement. `num_src_snk` has the number of sources in bits 7:0 and the number
-of sinks in bits 15:8.
+impelement. `num_src_snk` has the number of sources in bits 15:0 and the number
+of sinks in bits 31:16.
 
 ### 0x07: `NT_CMD_ROUTER_TIMEOUT`
 

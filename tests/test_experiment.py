@@ -675,7 +675,7 @@ def test_construct_vertex_commands(router_access_vertex):
         num_sources = len(vertices_source_nets[vertex])
         num_sinks = len(vertices_sink_nets[vertex])
         ref_cmd = struct.pack("<II", NT_CMD.NUM,
-                              (num_sources | num_sinks << 8))
+                              (num_sources | num_sinks << 16))
         assert ref_cmd in commands
 
     # Make sure all vertices have the right set of sources and sinks

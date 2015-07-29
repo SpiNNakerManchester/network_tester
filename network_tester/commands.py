@@ -221,7 +221,7 @@ class Commands(object):
 
         self._sink_key = [0] * num_sinks
 
-        self._commands.extend([NT_CMD.NUM, num_sources | (num_sinks << 8)])
+        self._commands.extend([NT_CMD.NUM, num_sources | (num_sinks << 16)])
 
     def router_timeout(self, wait1, wait2=0):
         """Set the router timeouts to use on the current chip.

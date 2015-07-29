@@ -498,8 +498,8 @@ void interpreter_main(uint commands_ptr, uint arg1)
 				break;
 			
 			case NT_CMD_NUM:
-				set_num_sources((*commands) & 0xFF);
-				set_num_sinks(((*commands) >> 8) & 0xFF);
+				set_num_sources((*commands) & 0xFFFF);
+				set_num_sinks(((*commands) >> 16) & 0xFFFF);
 				commands++;
 				break;
 			
