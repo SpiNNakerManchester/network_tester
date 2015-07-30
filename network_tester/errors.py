@@ -29,6 +29,9 @@ class NT_ERR(IntEnum):
     phase of the experiment."""
     MOST_DEADLINES_MISSED = 1 << 6
 
+    """A packet arrived whose key was unexpected."""
+    UNEXPECTED_PACKET = 1 << 7
+
     @property
     def is_deadline(self):
         """True iff the flag indicates a deadline was missed."""

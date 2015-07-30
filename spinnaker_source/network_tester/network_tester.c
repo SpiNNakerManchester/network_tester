@@ -250,13 +250,17 @@ void on_mc_packet(uint key, uint payload)
 			right = middle - 1;
 		} else if (key > cur_key) {
 			left = middle + 1;
-		} else {
+		} else if (key == cur_key) {
 			sinks[middle].arrived_count++;
+			return;
+		} else {
+			error_occurred |= NT_ERR_UNEXPECTED_PACKET;
 			return;
 		}
 		
 		middle = (left + right) / 2;
 	}
+	error_occurred |= NT_ERR_UNEXPECTED_PACKET;
 }
 
 
@@ -388,7 +392,8 @@ uint32_t run(uint32_t time_left_steps, bool enable_recording)
 			if (burst) {
 				for (int j = 0; j < sources[i].num_packets; j++) {
 					bool generate = (sources[i].probability == 0xFFFFFFFFu)
-					                || (sark_rand() < sources[i].probability);
+					                || ((sources[i].probability != 0x00000000u)
+					                    && (sark_rand() < sources[i].probability));
 					
 					if (generate) {
 						bool sent;

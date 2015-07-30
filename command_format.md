@@ -346,4 +346,6 @@ otherwise the bits which are set indicate what went wrong:
 * Bit 3: `NT_ERR_UNKNOWN_COMMAND`: An unknown command was encountered.
 * Bit 4: `NT_ERR_BAD_ARGUMENTS`: A command was supplied with bad arguments.
 * Bit 5: `NT_ERR_DEADLINE_MISSED`: A realtime deadline was missed.
+* Bit 6: `NT_ERR_MOST_DEADLINES_MISSED`: More than half the realtime deadlines were missed.
+* Bit 7: `NT_ERR_UNEXPECTED_PACKET`: A packet arrived with an unexpected key
 

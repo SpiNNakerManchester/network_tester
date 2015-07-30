@@ -72,6 +72,7 @@
 #define NT_ERR_BAD_ARGUMENTS (1 << 4)
 #define NT_ERR_DEADLINE_MISSED (1 << 5)
 #define NT_ERR_MOST_DEADLINES_MISSED (1 << 6)
+#define NT_ERR_UNEXPECTED_PACKET (1 << 7)
 
 
 /**

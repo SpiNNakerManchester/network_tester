@@ -23,7 +23,6 @@ nets = [e.new_net(v, random.sample(vertices, fan_out))
 #from rig.place_and_route.place.hilbert import place as hilbert_place
 #e.place_and_route(place=hilbert_place)
 
-
 ###############################################################################
 # Traffic description
 ###############################################################################
