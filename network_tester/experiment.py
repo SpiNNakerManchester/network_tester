@@ -402,6 +402,7 @@ class Experiment(object):
             vertices_source_nets, vertices_sink_nets)
 
         # Fill out the set of commands for each vertex
+        logger.info("Generating SpiNNaker configuration data...")
         vertices_commands = {
             vertex: self._construct_vertex_commands(
                 vertex=vertex,
