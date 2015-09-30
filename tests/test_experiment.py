@@ -4,6 +4,8 @@ import struct
 
 from mock import Mock
 
+from six import iteritems
+
 from rig.machine import Machine
 
 from network_tester.experiment import Experiment, Vertex, Net, Group
@@ -728,7 +730,8 @@ def test_construct_vertex_commands(router_access_vertex):
             assert ref_cmd1 not in commands
 
 
-def test_add_router_recording_vertices():
+@pytest.mark.parametrize("reinjection_used", [True, False])
+def test_add_router_recording_vertices(reinjection_used):
     # Make sure this internal utility adds extra vertices only when required.
     mock_mc = Mock()
     e = Experiment(mock_mc)
@@ -757,6 +760,7 @@ def test_add_router_recording_vertices():
     # If recording any router registers, a vertex must be allocated on every
     # chip, creating new ones when required.
     e.record_external_multicast = True
+    e.reinject_packets = reinjection_used
     (vertices, router_recording_vertices,
      placements, allocations, routes) =\
         e._add_router_recording_vertices()
@@ -775,6 +779,13 @@ def test_add_router_recording_vertices():
     # The vertex used on (0, 0) should be one we put there, not a new vertex
     assert (vertex0 in router_recording_vertices) ^ \
         (vertex1 in router_recording_vertices)
+    
+    # The newly added vertices should be on core 1 unless reinjection is used
+    # in which case they should be on core 2.
+    assert all(a[Cores].start == 2 if reinjection_used else 1
+               and a[Cores].start == 3 if reinjection_used else 2
+               for v, a in iteritems(e.allocations)
+               if v not in (vertex0, vertex1))
 
 
 def test_get_vertex_record_lookup():

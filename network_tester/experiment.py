@@ -477,6 +477,8 @@ class Experiment(object):
                 logger.info("Waiting for barrier...")
                 num_at_barrier = self._mc.wait_for_cores_to_reach_state(
                     next_barrier, len(vertices), timeout=10.0)
+                if num_at_barrier != len(vertices):
+                    input("Not all cores reached the barrier before {}.".format(group))
                 assert num_at_barrier == len(vertices), \
                     "Not all cores reached the barrier " \
                     "before {}.".format(group)
@@ -880,6 +882,10 @@ class Experiment(object):
             # If there are chips without any vertices allocated, new
             # router-access-only vertices must be added.
             num_extra_vertices = 0
+            if self._reinjection_used():
+                router_recording_core = 2
+            else:
+                router_recording_core = 1
             for xy in self.machine:
                 if xy not in recorded_chips:
                     # Create a new vertex for recording of router data only.
@@ -888,7 +894,8 @@ class Experiment(object):
                     router_access_vertices.add(vertex)
                     recorded_chips.add(xy)
                     placements[vertex] = xy
-                    allocations[vertex] = {Cores: slice(2, 3)}
+                    allocations[vertex] = {Cores: slice(router_recording_core,
+                                                        router_recording_core + 1)}
                     vertices.append(vertex)
 
             logger.info(
