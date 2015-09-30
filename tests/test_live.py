@@ -236,6 +236,6 @@ def test_impossible_deadline(experiment):
 
     # All packets should still have been sent
     assert totals["sent"] == 10
-    
+
     # But deadline misses should have been counted
     assert totals["deadlines_missed"] > 0

@@ -6,7 +6,7 @@ from mock import Mock
 
 from six import iteritems
 
-from rig.machine import Machine
+from rig.machine import Machine, Cores
 
 from network_tester.experiment import Experiment, Vertex, Net, Group
 
@@ -779,12 +779,12 @@ def test_add_router_recording_vertices(reinjection_used):
     # The vertex used on (0, 0) should be one we put there, not a new vertex
     assert (vertex0 in router_recording_vertices) ^ \
         (vertex1 in router_recording_vertices)
-    
+
     # The newly added vertices should be on core 1 unless reinjection is used
     # in which case they should be on core 2.
-    assert all(a[Cores].start == 2 if reinjection_used else 1
-               and a[Cores].start == 3 if reinjection_used else 2
-               for v, a in iteritems(e.allocations)
+    assert all(a[Cores].start == (2 if reinjection_used else 1)
+               and a[Cores].stop == (3 if reinjection_used else 2)
+               for v, a in iteritems(allocations)
                if v not in (vertex0, vertex1))
 
 
