@@ -979,3 +979,96 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
     if auto_create_group:
         num_groups = max(1, num_groups)
     assert len(mock_mc.send_signal.mock_calls) == num_groups
+
+
+def test_run_callbacks():
+    """Make sure that the run command's callbacks occur at the right time."""
+    num_groups = 3
+
+    machine = Machine(3, 1)
+
+    mock_mc = Mock()
+    mock_mc.get_machine.return_value = machine
+
+    mock_application_ctx = Mock()
+    mock_application_ctx.__enter__ = Mock()
+    mock_application_ctx.__exit__ = Mock()
+    mock_mc.application.return_value = mock_application_ctx
+
+    mock_mc.get_machine.return_value = machine
+
+    mock_mc.wait_for_cores_to_reach_state.return_value = len(list(machine))
+
+    def mock_sdram_file_read(size):
+        return b"\0\0\0\0" + b"\0"*(size - 4)
+    mock_sdram_file = Mock()
+    mock_sdram_file.read.side_effect = mock_sdram_file_read
+
+    mock_mc.sdram_alloc_as_filelike.return_value = mock_sdram_file
+
+    e = Experiment(mock_mc)
+    e.timestep = 1e-6
+    e.warmup = 0.01
+    e.duration = 0.01
+    e.cooldown = 0.01
+    e.flush_time = 0.01
+
+    # Enough to cause a recording vertex to be added to every chip
+    e.record_dropped_multicast = True
+
+    # Create a number of groups
+    groups = []
+    for group_num in range(num_groups):
+        groups.append(e.new_group())
+
+    before_load_calls = []
+    before_group_calls = []
+    before_read_results_calls = []
+
+    def before_load(experiment):
+        before_load_calls.append(experiment)
+
+        assert experiment is e
+
+        # Loading should not have started
+        assert not mock_mc.sdram_alloc_as_filelike.called
+
+    def before_group(experiment, group):
+        before_group_calls.append((experiment, group))
+
+        assert experiment is e
+
+        # Loading should have ocurred
+        assert mock_mc.sdram_alloc_as_filelike.called
+
+        # The group should appear in the correct sequence
+        assert group is groups.pop(0)
+
+        # The number of barriers reached should be progressing
+        assert len(mock_mc.wait_for_cores_to_reach_state.mock_calls) == \
+            (num_groups - len(groups))
+
+    def before_read_results(experiment):
+        before_read_results_calls.append(experiment)
+
+        assert experiment is e
+
+        # All groups should have been run
+        assert len(groups) == 0
+
+        # Reading should not have started
+        assert not mock_sdram_file.read.called
+
+    # The run should fail with an exception when expected.
+    results = e.run(0x33,
+                    before_load=before_load,
+                    before_group=before_group,
+                    before_read_results=before_read_results)
+
+    # The results should come out as usual...
+    assert isinstance(results, Results)
+
+    # All callbacks should have been called
+    assert len(before_load_calls) == 1
+    assert len(before_group_calls) == num_groups
+    assert len(before_read_results_calls) == 1

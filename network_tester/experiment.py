@@ -294,7 +294,8 @@ class Experiment(object):
         return g
 
     def run(self, app_id=0x42, create_group_if_none_exist=True,
-            ignore_deadline_errors=False):
+            ignore_deadline_errors=False, before_load=None, before_group=None,
+            before_read_results=None):
         """Run the experiment on SpiNNaker and return the results.
 
         If placements, allocations or routes have not been provided, the
@@ -333,6 +334,22 @@ class Experiment(object):
             This option is useful when running experiments which involve
             over-saturating packet sinks or the network in some experimental
             groups.
+        before_load : function or None
+            If not None, this function is called before the network tester
+            application is loaded onto the machine. It is called with the
+            :py:class:`Experiment` object as its argument. The function may
+            block to postpone the loading process as required.
+        before_group : function or None
+            If not None, this function is called before each experimental group
+            is run on the machine. It is called with the :py:class:`Experiment`
+            object and :py:class:`Group` as its argument. The function may
+            block to postpone the execution of each group as required.
+        before_read_results : function or None
+            If not None, this function is called after all experimental groups
+            have run and before the results are read back from the machine. It
+            is called with the :py:class:`Experiment` object as its argument.
+            The function may block to postpone the reading of results as
+            required.
 
         Returns
         -------
@@ -428,6 +445,9 @@ class Experiment(object):
         # The raw result data for each vertex.
         vertices_result_data = {}
 
+        if before_load is not None:
+            before_load(self)
+
         # Actually load and run the experiment on the machine.
         with self._mc.application(app_id):
             # Allocate SDRAM. This is enough to fit the commands and also any
@@ -481,6 +501,9 @@ class Experiment(object):
                     "Not all cores reached the barrier " \
                     "before {}.".format(group)
 
+                if before_group is not None:
+                    before_group(self, group)
+
                 self._mc.send_signal(next_barrier)
                 next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
 
@@ -503,6 +526,9 @@ class Experiment(object):
                 "exit", len(vertices), timeout=10.0)
             assert num_at_barrier == len(vertices), \
                 "Not all cores reached the final barrier."
+
+            if before_read_results is not None:
+                before_read_results(self)
 
             # Read recorded data back
             logger.info("Reading back {} bytes of results...".format(
