@@ -4,6 +4,11 @@ import sys
 with open("network_tester/version.py", "r") as f:
     exec(f.read())
 
+requirements = ["rig", "numpy>1.6", "six"]
+if sys.version_info < (3, 4, 0):
+    # Python versions < 3.4 require "enum34" to be installed
+    requirements.append("enum34")
+
 setup(
     name="network_tester",
     version=__version__,
@@ -17,5 +22,5 @@ setup(
     license="GPLv2",
 
     # Requirements
-    install_requires=["rig", "numpy>1.6", "six", "enum34"],
+    install_requires=requirements,
 )
