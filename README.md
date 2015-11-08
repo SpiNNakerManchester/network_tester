@@ -1,6 +1,7 @@
 SpiNNaker Network Tester
 ========================
 
+[![Latest Version](https://img.shields.io/pypi/v/network_tester.svg?style=flat)](https://pypi.python.org/pypi/network_tester/)
 [![Documentation](https://readthedocs.org/projects/network-tester/badge/?version=stable)](http://network-tester.readthedocs.org/en/stable/)
 [![Build Status](https://travis-ci.org/project-rig/network_tester.svg?branch=master)](https://travis-ci.org/project-rig/network_tester)
 [![Coverage Status](https://coveralls.io/repos/project-rig/network_tester/badge.svg?branch=master)](https://coveralls.io/r/project-rig/network_tester?branch=master)
