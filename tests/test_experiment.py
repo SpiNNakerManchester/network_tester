@@ -730,6 +730,28 @@ def test_construct_vertex_commands(router_access_vertex):
             assert ref_cmd1 not in commands
 
 
+def test_vertex_chip():
+    # Make sure specifying the location of each vertex works
+    mock_mc = Mock()
+    mock_mc.get_machine.return_value = Machine(2, 2)
+
+    e = Experiment(mock_mc)
+
+    v00 = e.new_vertex(chip=(0, 0))
+    v01 = e.new_vertex(chip=(0, 1))
+    v10 = e.new_vertex(chip=(1, 0))
+    v11 = e.new_vertex(chip=(1, 1))
+
+    e.place_and_route()
+
+    assert e.placements == {
+        v00: (0, 0),
+        v01: (0, 1),
+        v10: (1, 0),
+        v11: (1, 1),
+    }
+
+
 @pytest.mark.parametrize("reinjection_used", [True, False])
 def test_add_router_recording_vertices(reinjection_used):
     # Make sure this internal utility adds extra vertices only when required.

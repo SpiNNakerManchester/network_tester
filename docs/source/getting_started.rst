@@ -82,8 +82,11 @@ vertices::
     ...         for vertex in vertices]
 
 By default, the vertices and nets we've defined will be automatically placed
-and routed in the SpiNNaker machine before we run the experiment. For greater
-control over this process, see :py:meth:`~Experiment.place_and_route`.
+and routed in the SpiNNaker machine before we run the experiment.  To manually
+specify which chip each vertex is added to, see the ``chip`` argument to
+:py:meth:`~Experiment.new_vertex`. For greater control over the place and route
+process, see :py:meth:`~Experiment.place_and_route`.
+
 
 Controling packet generation
 ----------------------------

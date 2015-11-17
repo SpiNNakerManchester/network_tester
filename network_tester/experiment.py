@@ -21,7 +21,8 @@ from rig.place_and_route import place, allocate, route
 from rig.place_and_route.utils import \
     build_routing_tables, build_application_map
 
-from rig.place_and_route.constraints import ReserveResourceConstraint
+from rig.place_and_route.constraints import \
+    ReserveResourceConstraint, LocationConstraint
 
 from network_tester.commands import Commands
 
@@ -152,7 +153,7 @@ class Experiment(object):
             if not counter.permanent_counter:
                 self._values["record_{}".format(counter.name)] = False
 
-    def new_vertex(self, name=None):
+    def new_vertex(self, name=None, chip=None):
         """Create a new :py:class:`Vertex`.
 
         A vertex corresponds with a SpiNNaker application core and can produce
@@ -178,13 +179,24 @@ class Experiment(object):
             *Optional.* A name for the vertex. If not specified the vertex will
             be given a number as its name. This name will be used in results
             tables.
+        chip : (x, y) or None
+            If a tuple (x, y) is given, this vertex will be placed on the chip
+            with the specified coordinates. Note: A vertex represents whole
+            SpiNNaker core therefore there is a limit on the number of vertices
+            which may be placed on a given chip.
+
+            If None (the default), the vertex will be automatically placed on
+            some available chip (see
+            :py:meth:`network_tester.Experiment.place_and_route`).
 
         Returns
         -------
         :py:class:`Vertex`
             An object representing the vertex.
         """
-        v = Vertex(self, name if name is not None else len(self._vertices))
+        v = Vertex(self,
+                   name if name is not None else len(self._vertices),
+                   chip)
         self._vertices.append(v)
 
         # Adding a new vertex invalidates any existing placement solution
@@ -582,7 +594,8 @@ class Experiment(object):
             A list of additional constraints to apply. A
             :py:class:`rig.place_and_route.constraints.ReserveResourceConstraint`
             will be applied to reserve the monitor processor on top of this
-            constraint.
+            constraint along with location constraints for all vertices whose
+            chip has been specified.
         place : placer
             A Rig-API complaint placement algorithm.
         place_kwargs : dict
@@ -607,6 +620,13 @@ class Experiment(object):
         # Reserve the monitor processor for each chip
         constraints = constraints or []
         constraints += [ReserveResourceConstraint(Cores, slice(0, 1))]
+
+        # Force the placements of vertices whose positions are pre-defined
+        constraints.extend(
+            LocationConstraint(vertex, vertex.chip)
+            for vertex in self._vertices
+            if vertex.chip is not None
+        )
 
         # Reserve a core for packet reinjection on each chip (if required)
         if self._reinjection_used():
@@ -1109,9 +1129,10 @@ class Vertex(object):
     <net-attributes>` for experimental parameters associated with vertices.
     """
 
-    def __init__(self, experiment, name):
+    def __init__(self, experiment, name, chip=None):
         self._experiment = experiment
         self.name = name
+        self.chip = chip
 
     class _Option(object):
         """A descriptor which provides access to the experiment's _values
