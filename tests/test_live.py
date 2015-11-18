@@ -80,63 +80,63 @@ def test_transmission(experiment):
     experiment.probability = 1.0
 
     # No bursting for this pair
-    v0 = experiment.new_vertex()
-    v1 = experiment.new_vertex()
-    n0 = experiment.new_net(v0, [v0, v1])
+    c0 = experiment.new_core()
+    c1 = experiment.new_core()
+    f0 = experiment.new_flow(c0, [c0, c1])
 
     # Bursting 40% of the time, twice during the run
-    v2 = experiment.new_vertex()
-    v3 = experiment.new_vertex()
-    n1 = experiment.new_net(v2, [v2, v3])
-    n1.burst_period = 5e-3  # 5000us
-    n1.burst_duty = 0.4
-    n1.burst_phase = 0.0
+    c2 = experiment.new_core()
+    c3 = experiment.new_core()
+    f1 = experiment.new_flow(c2, [c2, c3])
+    f1.burst_period = 5e-3  # 5000us
+    f1.burst_duty = 0.4
+    f1.burst_phase = 0.0
 
     # As above but phase-offset by 40%
-    v4 = experiment.new_vertex()
-    v5 = experiment.new_vertex()
-    n2 = experiment.new_net(v4, [v4, v5])
-    n2.burst_period = 5e-3  # 5000us
-    n2.burst_duty = 0.4
-    n2.burst_phase = 0.4
+    c4 = experiment.new_core()
+    c5 = experiment.new_core()
+    f2 = experiment.new_flow(c4, [c4, c5])
+    f2.burst_period = 5e-3  # 5000us
+    f2.burst_duty = 0.4
+    f2.burst_phase = 0.4
 
     # 0% probability
-    v6 = experiment.new_vertex()
-    v7 = experiment.new_vertex()
-    n3 = experiment.new_net(v6, [v6, v7])
-    n3.probability = 0.0
+    c6 = experiment.new_core()
+    c7 = experiment.new_core()
+    f3 = experiment.new_flow(c6, [c6, c7])
+    f3.probability = 0.0
 
     # 50% probability
-    v8 = experiment.new_vertex()
-    v9 = experiment.new_vertex()
-    n4 = experiment.new_net(v8, [v8, v9])
-    n4.probability = 0.5
+    c8 = experiment.new_core()
+    c9 = experiment.new_core()
+    f4 = experiment.new_flow(c8, [c8, c9])
+    f4.probability = 0.5
 
     experiment.new_group()
     results = experiment.run()
 
-    net_totals = results.net_totals()
+    flow_totals = results.flow_totals()
 
     # Packets should be sent every cycle
-    assert (net_totals[net_totals["net"] == n0]["sent"] ==
+    assert (flow_totals[flow_totals["flow"] == f0]["sent"] ==
             [10, 10, 10, 10, 10, 10, 10, 10, 10, 10]).all()
 
     # Check duty-cycle is correct
-    n1_sent = net_totals[net_totals["net"] == n1]["sent"]
+    n1_sent = flow_totals[flow_totals["flow"] == f1]["sent"]
     counts, bins = np.histogram(n1_sent, [0, 5, 11])
     assert (counts == [6, 4]).all()
 
-    n2_sent = net_totals[net_totals["net"] == n2]["sent"]
+    n2_sent = flow_totals[flow_totals["flow"] == f2]["sent"]
 
     # Check the phase is adjusted
     assert (n2_sent == np.roll(n1_sent, -2)).all()
 
     # No packets should be sent
-    assert (net_totals[net_totals["net"] == n3]["sent"] ==
+    assert (flow_totals[flow_totals["flow"] == f3]["sent"] ==
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).all()
 
     # Approximately 50% of packets should be sent
-    assert 20 < np.sum(net_totals[net_totals["net"] == n4]["sent"]) < 80
+    assert 20 < np.sum(flow_totals[flow_totals["flow"] == f4]["sent"]) < 80
 
 
 def test_recipt(experiment):
@@ -149,24 +149,28 @@ def test_recipt(experiment):
 
     experiment.record_received = True
 
-    target = experiment.new_vertex()
-    source0 = experiment.new_vertex()
-    source1 = experiment.new_vertex()
+    target = experiment.new_core()
+    source0 = experiment.new_core()
+    source1 = experiment.new_core()
 
-    net0 = experiment.new_net(source0, target)
-    net1 = experiment.new_net(source1, target)
+    flow0 = experiment.new_flow(source0, target)
+    flow1 = experiment.new_flow(source1, target)
 
-    net0.probability = 0.25
-    net1.probability = 0.75
+    flow0.probability = 0.25
+    flow1.probability = 0.75
 
     experiment.new_group()
     results = experiment.run()
 
-    net_totals = results.net_totals()
+    flow_totals = results.flow_totals()
 
     # Approximately the right number of packets should arrive for each counter
-    assert 10 < np.sum(net_totals[net_totals["net"] == net0]["received"]) < 40
-    assert 60 < np.sum(net_totals[net_totals["net"] == net1]["received"]) < 90
+    assert (10 <
+            np.sum(flow_totals[flow_totals["flow"] == flow0]["received"])
+            < 40)
+    assert (60 <
+            np.sum(flow_totals[flow_totals["flow"] == flow1]["received"])
+            < 90)
 
 
 def test_consume(experiment):
@@ -180,10 +184,10 @@ def test_consume(experiment):
     experiment.record_received = True
     experiment.record_dropped_multicast = True
 
-    target = experiment.new_vertex()
-    source = experiment.new_vertex()
-    net = experiment.new_net(source, target)
-    net.probability = 1.0
+    target = experiment.new_core()
+    source = experiment.new_core()
+    flow = experiment.new_flow(source, target)
+    flow.probability = 1.0
 
     # The first group doesn't accept packets
     with experiment.new_group() as group_noconsume:
@@ -220,10 +224,10 @@ def test_impossible_deadline(experiment):
 
     experiment.record_sent = True
 
-    target = experiment.new_vertex()
-    source = experiment.new_vertex()
-    net = experiment.new_net(source, target)
-    net.probability = 1.0
+    target = experiment.new_core()
+    source = experiment.new_core()
+    flow = experiment.new_flow(source, target)
+    flow.probability = 1.0
 
     experiment.new_group()
 

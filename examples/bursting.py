@@ -4,7 +4,7 @@ burstiness of the traffic is varied."""
 import sys
 import random
 
-from network_tester import Experiment, NetworkTesterError, to_csv
+from network_tester import Experiment
 
 e = Experiment(sys.argv[1])
 
@@ -13,15 +13,15 @@ e = Experiment(sys.argv[1])
 ###############################################################################
 
 # We'll create a random network of a certain number of nodes
-num_vertices = 64
+num_cores = 64
 fan_out = 8
-vertices = [e.new_vertex() for _ in range(num_vertices)]
-nets = [e.new_net(v, random.sample(vertices, fan_out))
-        for v in vertices]
+cores = [e.new_core() for _ in range(num_cores)]
+flows = [e.new_flow(c, random.sample(cores, fan_out))
+         for c in cores]
 
 # Uncomment to place the network using the (dumb) Hilbert placer.
-#from rig.place_and_route.place.hilbert import place as hilbert_place
-#e.place_and_route(place=hilbert_place)
+# from rig.place_and_route.place.hilbert import place as hilbert_place
+# e.place_and_route(place=hilbert_place)
 
 ###############################################################################
 # Traffic description
@@ -36,7 +36,7 @@ e.use_payload = True
 
 # We'll run the experiment for a reasonable number of periods, allowing some
 # warmup time for the network behaviour to stabilise and also adding some
-# cooldown time to ensure all vertices have finished recording before stopping
+# cooldown time to ensure all cores have finished recording before stopping
 # traffic generation.
 e.duration = e.burst_period * 100
 e.warmup = e.burst_period * 10

@@ -6,12 +6,12 @@ SpiNNaker Network Tester
 [![Build Status](https://travis-ci.org/project-rig/network_tester.svg?branch=master)](https://travis-ci.org/project-rig/network_tester)
 [![Coverage Status](https://coveralls.io/repos/project-rig/network_tester/badge.svg?branch=master)](https://coveralls.io/r/project-rig/network_tester?branch=master)
 
-‘Network Tester’ is a library designed to enable experimenters to quickly and
-easily describe and run experiments on SpiNNaker‘s interconnection network. In
+'Network Tester' is a library designed to enable experimenters to quickly and
+easily describe and run experiments on SpiNNaker's interconnection network. In
 particular, network tester is designed to make recreating traffic loads similar
 to typical neural software straight-forward. Such network loads feature a fixed
-set of vertices (cores) which produce SpiNNaker packets which are then
-multicast to a fixed set of vertices.
+set of cores with a fixed set of multicast flows of SpiNNaker packets between
+them.
 
 The following is a (non-exhaustive) list of the kinds of experiments which can
 be performed with ‘Network Tester’:

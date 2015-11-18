@@ -26,11 +26,10 @@ A Network Tester 'experiment' consists of a network description along with a
 series of experimental 'groups' during which different traffic patterns or
 network parameters are applied in sequence.
 
-A network is described as a set of 'vertices', representing SpiNNaker
-application cores, connected by a set of multicast 'nets' which represent
-streams of packets sourced by a traffic generator in one vertex and sunk by
-traffic consumers in another set of vertices. A single vertex (core) may be
-associated with many nets and thus may contain multiple traffic generators and
+A network is described as a set of cores between which multicast flows of
+packets exist. Each flow is sourced by a traffic generator in one core and sunk
+by traffic consumers in another set of cores. A single core may source and sink
+many flows simultaneously and thus may contain multiple traffic generators and
 traffic consumers.
 
 Each experimental group consists of a period of traffic generation and
@@ -66,32 +65,33 @@ SpiNNaker IP address or hostname as its argument::
     >>> from network_tester import Experiment
     >>> e = Experiment("192.168.240.253")
 
-The first task when defining an experiment is to define a set of vertices and
-nets between them. In this example we'll create a network with 64 randomly
-connected vertices. First the vertices are created using
-:py:meth:`~Experiment.new_vertex`::
+The first task when defining an experiment is to define a set of cores and
+flows between them. In this example we'll create a network with 64 randomly
+connected cores. First the cores are created using
+:py:meth:`~Experiment.new_core`::
 
-    >>> vertices = [e.new_vertex() for _ in range(64)]
+    >>> cores = [e.new_core() for _ in range(64)]
 
-Next we create a single net for each vertex using
-:py:meth:`~Experiment.new_vertex` which connects to eight randomly selected
-vertices::
+Next we create a single flow for each core using
+:py:meth:`~Experiment.new_flow` which connects to eight randomly selected
+cores::
 
     >>> import random
-    >>> nets = [e.new_net(vertex, random.sample(vertices, 8))
-    ...         for vertex in vertices]
+    >>> flows = [e.new_flow(core, random.sample(cores, 8))
+    ...          for core in cores]
 
-By default, the vertices and nets we've defined will be automatically placed
-and routed in the SpiNNaker machine before we run the experiment.  To manually
-specify which chip each vertex is added to, see the ``chip`` argument to
-:py:meth:`~Experiment.new_vertex`. For greater control over the place and route
+By default, the cores and flows we've defined will be automatically placed and
+routed in the SpiNNaker machine before we run the experiment.  To manually
+specify which chip each core is added to, this can be given as arguments to
+:py:meth:`~Experiment.new_core`, for example ``e.new_core(1, 2)`` would
+create a core on chip (1, 2). For greater control over the place and route
 process, see :py:meth:`~Experiment.place_and_route`.
 
 
 Controling packet generation
 ----------------------------
 
-Every net has its own traffic generator on its source vertex. These traffic
+Every flow has its own traffic generator on its source core. These traffic
 generators can be configured to produce a range of different traffic patterns
 but in this example we'll configure the traffic generators to produce a simple
 Bernoulli_ traffic pattern. In a Bernoulli distribution, each traffic generator
@@ -105,10 +105,9 @@ network.
 The timestep and packet generation probability are examples of some of the
 :ref:`experimental parameters <experimental-parameters>` which can be
 controlled and varied during an experiment. These parameters can be controlled
-by setting attributes of the :py:class:`Experiment` object or
-:py:class:`Vertex` and :py:class:`Net` objects returned by
-:py:meth:`~Experiment.new_vertex` and :py:meth:`~Experiment.new_vertex`
-respectively.
+by setting attributes of the :py:class:`Experiment` object or :py:class:`Core`
+and :py:class:`Flow` objects returned by :py:meth:`~Experiment.new_core` and
+:py:meth:`~Experiment.new_flow` respectively.
 
 In our example we'll set the :py:attr:`~Experiment.timestep` to 10 microseconds
 meaning the packet generators in the experiment *may* generate a packet every
@@ -143,14 +142,14 @@ to plot data straight out of the tool.
 .. note::
     
     Some parameters such as :py:attr:`~Experiment.timestep` are 'global' (i.e.
-    they're the same for every net and vertex) and thus can only changed
-    experiment-wide. Other parameters, such as :py:attr:`~Net.probability` can
-    be set individually for different vertices or nets. As a convenience,
+    they're the same for every flow and core) and thus can only changed
+    experiment-wide. Other parameters, such as :py:attr:`~Flow.probability` can
+    be set individually for different cores or flows. As a convenience,
     setting these parameters on the :py:class:`Experiment` object sets the
-    'default' value for all vertices or nets. For example::
+    'default' value for all cores or flows. For example::
     
-        >>> for net in nets:
-        ...     net.probability = 0.5
+        >>> for flow in flows:
+        ...     flow.probability = 0.5
     
     Is equivilent to::
     
@@ -183,7 +182,7 @@ Recording results
 -----------------
 
 Various metrics may be recorded during an experiment. In our example we'll
-simply record the number of packets received by the sinks of each net.
+simply record the number of packets received by the sinks of each flow.
 Attributes of the :py:class:`Experiment` object whose names start with
 ``record_`` are used to select what metrics are recorded, in this case we
 enable :py:attr:`~Experiment.record_received`::
@@ -191,7 +190,7 @@ enable :py:attr:`~Experiment.record_received`::
     >>> e.record_received = True
 
 The full set of recordable metrics is :ref:`enumerated in the API documentation
-<metric-recording>` and includes per-net packet counts, router diagnostic
+<metric-recording>` and includes per-flow packet counts, router diagnostic
 counters and packet reinjection statistics.
 
 By default, the recorded metrics are sampled once at the end of each
@@ -202,10 +201,10 @@ regular interval (see the :py:attr:`~Experiment.record_interval` parameter).
     
     Unlike the experimental parameters, the set of recorded metrics is fixed
     for the whole experiment and cannot be changed within groups. Further,
-    individual nets, vertices or router's metrics cannot be enabled and
-    disabled individually. Note, however, that
-    :py:attr:`~Experiment.record_interval` is an experimental parameter and
-    thus *can* be set independently for each group.
+    individual flows, cores or router's metrics cannot be enabled and disabled
+    individually. Note, however, that :py:attr:`~Experiment.record_interval` is
+    an experimental parameter and thus *can* be set independently for each
+    group.
 
 
 Running the experiment and plotting results

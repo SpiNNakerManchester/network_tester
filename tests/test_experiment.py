@@ -6,9 +6,11 @@ from mock import Mock
 
 from six import iteritems
 
+from rig.netlist import Net as RigNet
+
 from rig.machine import Machine, Cores
 
-from network_tester.experiment import Experiment, Vertex, Net, Group
+from network_tester.experiment import Experiment, Core, Flow, Group
 
 from network_tester.commands import NT_CMD
 
@@ -38,40 +40,40 @@ def test_new_functions():
     e = Experiment(Mock())
 
     # Types should be appropriate
-    vertex0 = e.new_vertex()
-    assert isinstance(vertex0, Vertex)
-    net0 = e.new_net(vertex0, vertex0)
-    assert isinstance(net0, Net)
+    core0 = e.new_core()
+    assert isinstance(core0, Core)
+    flow0 = e.new_flow(core0, core0)
+    assert isinstance(flow0, Flow)
     group0 = e.new_group()
     assert isinstance(group0, Group)
 
     # Everything should be given unique names
-    vertex1 = e.new_vertex()
-    net1 = e.new_net(vertex1, vertex1)
+    core1 = e.new_core()
+    flow1 = e.new_flow(core1, core1)
     group1 = e.new_group()
-    assert vertex0.name != vertex1.name
-    assert net0.name != net1.name
+    assert core0.name != core1.name
+    assert flow0.name != flow1.name
     assert group0.name != group1.name
 
     # Custom names should be allowed
-    vertex_foo = e.new_vertex(name="foo")
-    net_bar = e.new_net(vertex_foo, vertex_foo, name="bar")
+    core_foo = e.new_core(name="foo")
+    flow_bar = e.new_flow(core_foo, core_foo, name="bar")
     group_baz = e.new_group(name="baz")
-    assert vertex_foo.name == "foo"
-    assert net_bar.name == "bar"
+    assert core_foo.name == "foo"
+    assert flow_bar.name == "bar"
     assert group_baz.name == "baz"
 
     # The objects should all give their name/type in their repr string
-    assert repr(vertex0) == "<Vertex 0>"
-    assert repr(net0) == "<Net 0>"
+    assert repr(core0) == "<Core 0>"
+    assert repr(flow0) == "<Flow 0>"
     assert repr(group0) == "<Group 0>"
 
-    assert repr(vertex1) == "<Vertex 1>"
-    assert repr(net1) == "<Net 1>"
+    assert repr(core1) == "<Core 1>"
+    assert repr(flow1) == "<Flow 1>"
     assert repr(group1) == "<Group 1>"
 
-    assert repr(vertex_foo) == "<Vertex 'foo'>"
-    assert repr(net_bar) == "<Net 'bar'>"
+    assert repr(core_foo) == "<Core 'foo'>"
+    assert repr(flow_bar) == "<Flow 'bar'>"
     assert repr(group_baz) == "<Group 'baz'>"
 
 
@@ -80,10 +82,10 @@ def test_option_getters_setters():
     e = Experiment(Mock())
 
     group0 = e.new_group()
-    vertex0 = e.new_vertex()
-    vertex1 = e.new_vertex()
-    net0 = e.new_net(vertex0, vertex1)
-    net1 = e.new_net(vertex1, vertex0)
+    core0 = e.new_core()
+    core1 = e.new_core()
+    flow0 = e.new_flow(core0, core1)
+    flow1 = e.new_flow(core1, core0)
 
     # Make sure the getters setters use specific values with the correct
     # priority.
@@ -91,149 +93,149 @@ def test_option_getters_setters():
     # Should get global (default) value
     assert e._get_option_value("timestep") == 0.001
     assert e._get_option_value("timestep", group=group0) == 0.001
-    assert e._get_option_value("timestep", vert_or_net=vertex0) == 0.001
-    assert e._get_option_value("timestep", vert_or_net=net0) == 0.001
+    assert e._get_option_value("timestep", core_or_flow=core0) == 0.001
+    assert e._get_option_value("timestep", core_or_flow=flow0) == 0.001
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex0) == 0.001
+                               core_or_flow=core0) == 0.001
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net0) == 0.001
+                               core_or_flow=flow0) == 0.001
 
     # Should be able to change the default value
     e._set_option_value("timestep", 0.1)
     assert e._get_option_value("timestep") == 0.1
     assert e._get_option_value("timestep", group=group0) == 0.1
-    assert e._get_option_value("timestep", vert_or_net=vertex0) == 0.1
-    assert e._get_option_value("timestep", vert_or_net=net0) == 0.1
+    assert e._get_option_value("timestep", core_or_flow=core0) == 0.1
+    assert e._get_option_value("timestep", core_or_flow=flow0) == 0.1
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex0) == 0.1
+                               core_or_flow=core0) == 0.1
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net0) == 0.1
+                               core_or_flow=flow0) == 0.1
 
-    # Should be able to change the value for a particular vertex
-    e._set_option_value("timestep", 0.5, vert_or_net=vertex0)
+    # Should be able to change the value for a particular core
+    e._set_option_value("timestep", 0.5, core_or_flow=core0)
     assert e._get_option_value("timestep") == 0.1
     assert e._get_option_value("timestep", group=group0) == 0.1
-    assert e._get_option_value("timestep", vert_or_net=vertex0) == 0.5
-    assert e._get_option_value("timestep", vert_or_net=net0) == 0.5
-    assert e._get_option_value("timestep", vert_or_net=net1) == 0.1
+    assert e._get_option_value("timestep", core_or_flow=core0) == 0.5
+    assert e._get_option_value("timestep", core_or_flow=flow0) == 0.5
+    assert e._get_option_value("timestep", core_or_flow=flow1) == 0.1
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex0) == 0.5
+                               core_or_flow=core0) == 0.5
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net0) == 0.5
+                               core_or_flow=flow0) == 0.5
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net1) == 0.1
+                               core_or_flow=flow1) == 0.1
 
-    # Should be able to change the value for a particular net
-    e._set_option_value("timestep", 0.6, vert_or_net=net0)
+    # Should be able to change the value for a particular flow
+    e._set_option_value("timestep", 0.6, core_or_flow=flow0)
     assert e._get_option_value("timestep") == 0.1
     assert e._get_option_value("timestep", group=group0) == 0.1
-    assert e._get_option_value("timestep", vert_or_net=vertex0) == 0.5
-    assert e._get_option_value("timestep", vert_or_net=net0) == 0.6
-    assert e._get_option_value("timestep", vert_or_net=net1) == 0.1
+    assert e._get_option_value("timestep", core_or_flow=core0) == 0.5
+    assert e._get_option_value("timestep", core_or_flow=flow0) == 0.6
+    assert e._get_option_value("timestep", core_or_flow=flow1) == 0.1
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex0) == 0.5
+                               core_or_flow=core0) == 0.5
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net0) == 0.6
+                               core_or_flow=flow0) == 0.6
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net1) == 0.1
+                               core_or_flow=flow1) == 0.1
 
-    # Should be able to change the value for a particular group (vertex/net
+    # Should be able to change the value for a particular group (core/flow
     # values should override still)
     e._set_option_value("timestep", 1.0, group=group0)
     assert e._get_option_value("timestep") == 0.1
     assert e._get_option_value("timestep", group=group0) == 1.0
-    assert e._get_option_value("timestep", vert_or_net=vertex0) == 0.5
-    assert e._get_option_value("timestep", vert_or_net=net0) == 0.6
-    assert e._get_option_value("timestep", vert_or_net=net1) == 0.1
+    assert e._get_option_value("timestep", core_or_flow=core0) == 0.5
+    assert e._get_option_value("timestep", core_or_flow=flow0) == 0.6
+    assert e._get_option_value("timestep", core_or_flow=flow1) == 0.1
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex0) == 0.5
+                               core_or_flow=core0) == 0.5
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net0) == 0.6
+                               core_or_flow=flow0) == 0.6
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net1) == 1.0
+                               core_or_flow=flow1) == 1.0
 
-    # Should be able to change the value for a particular vertex-group pair and
-    # the net value should still take priority
-    e._set_option_value("timestep", 10.0, group=group0, vert_or_net=vertex0)
+    # Should be able to change the value for a particular core-group pair and
+    # the flow value should still take priority
+    e._set_option_value("timestep", 10.0, group=group0, core_or_flow=core0)
     assert e._get_option_value("timestep") == 0.1
     assert e._get_option_value("timestep", group=group0) == 1.0
-    assert e._get_option_value("timestep", vert_or_net=vertex0) == 0.5
-    assert e._get_option_value("timestep", vert_or_net=net0) == 0.6
+    assert e._get_option_value("timestep", core_or_flow=core0) == 0.5
+    assert e._get_option_value("timestep", core_or_flow=flow0) == 0.6
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex0) == 10.0
+                               core_or_flow=core0) == 10.0
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net0) == 0.6
+                               core_or_flow=flow0) == 0.6
 
-    # Should be able to change the value for a particular vertex-group pair and
-    # implicitly set a net value which has not been overridden.
-    e._set_option_value("timestep", 20.0, group=group0, vert_or_net=vertex1)
+    # Should be able to change the value for a particular core-group pair and
+    # implicitly set a flow value which has not been overridden.
+    e._set_option_value("timestep", 20.0, group=group0, core_or_flow=core1)
     assert e._get_option_value("timestep") == 0.1
     assert e._get_option_value("timestep", group=group0) == 1.0
-    assert e._get_option_value("timestep", vert_or_net=vertex1) == 0.1
-    assert e._get_option_value("timestep", vert_or_net=net1) == 0.1
+    assert e._get_option_value("timestep", core_or_flow=core1) == 0.1
+    assert e._get_option_value("timestep", core_or_flow=flow1) == 0.1
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex1) == 20.0
+                               core_or_flow=core1) == 20.0
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net1) == 20.0
+                               core_or_flow=flow1) == 20.0
 
-    # Should be able to change the value for a particular net-group pair and
+    # Should be able to change the value for a particular flow-group pair and
     # it should take priority over anything else in that group.
-    e._set_option_value("timestep", 30.0, group=group0, vert_or_net=net0)
+    e._set_option_value("timestep", 30.0, group=group0, core_or_flow=flow0)
     assert e._get_option_value("timestep") == 0.1
     assert e._get_option_value("timestep", group=group0) == 1.0
-    assert e._get_option_value("timestep", vert_or_net=vertex0) == 0.5
-    assert e._get_option_value("timestep", vert_or_net=net0) == 0.6
+    assert e._get_option_value("timestep", core_or_flow=core0) == 0.5
+    assert e._get_option_value("timestep", core_or_flow=flow0) == 0.6
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=vertex0) == 10.0
+                               core_or_flow=core0) == 10.0
     assert e._get_option_value("timestep",
                                group=group0,
-                               vert_or_net=net0) == 30.0
+                               core_or_flow=flow0) == 30.0
 
     # Should be able to get values which don't support exceptions
     assert e._get_option_value("record_sent") is False
     assert e._get_option_value("record_sent", group=group0) is False
-    assert e._get_option_value("record_sent", vert_or_net=vertex0) is False
+    assert e._get_option_value("record_sent", core_or_flow=core0) is False
     assert e._get_option_value("record_sent",
                                group=group0,
-                               vert_or_net=vertex0) is False
+                               core_or_flow=core0) is False
 
     # Should be able to set values which don't support exceptions
     e._set_option_value("record_sent", True)
     assert e._get_option_value("record_sent") is True
     assert e._get_option_value("record_sent", group=group0) is True
-    assert e._get_option_value("record_sent", vert_or_net=vertex0) is True
+    assert e._get_option_value("record_sent", core_or_flow=core0) is True
     assert e._get_option_value("record_sent",
                                group=group0,
-                               vert_or_net=vertex0) is True
+                               core_or_flow=core0) is True
 
     # Shouldn't be able to set exceptions to options which don't support them
     with pytest.raises(ValueError):
         e._set_option_value("record_sent", False, group=group0)
     with pytest.raises(ValueError):
-        e._set_option_value("record_sent", False, vert_or_net=vertex0)
+        e._set_option_value("record_sent", False, core_or_flow=core0)
     with pytest.raises(ValueError):
         e._set_option_value("record_sent",
                             False,
                             group=group0,
-                            vert_or_net=vertex0)
+                            core_or_flow=core0)
 
 
 def test_option_descriptors():
@@ -261,44 +263,44 @@ def test_option_descriptors():
     e.record_sent = True
     assert e.record_sent is True
 
-    # Should be able to set exceptions for vertices
-    vertex0 = e.new_vertex()
-    assert vertex0.probability == 0.1
-    vertex0.probability = 0.5
-    assert vertex0.probability == 0.5
+    # Should be able to set exceptions for cores
+    core0 = e.new_core()
+    assert core0.probability == 0.1
+    core0.probability = 0.5
+    assert core0.probability == 0.5
     assert e.probability == 0.1
 
-    # Should be able to set exceptions for nets
-    net0 = e.new_net(vertex0, vertex0)
-    assert net0.probability == 0.5
-    net0.probability = 0.6
-    assert net0.probability == 0.6
-    assert vertex0.probability == 0.5
+    # Should be able to set exceptions for flows
+    flow0 = e.new_flow(core0, core0)
+    assert flow0.probability == 0.5
+    flow0.probability = 0.6
+    assert flow0.probability == 0.6
+    assert core0.probability == 0.5
     assert e.probability == 0.1
 
-    # Should be able to set exceptions in groups for vertices and nets
+    # Should be able to set exceptions in groups for cores and flows
     with e.new_group():
         assert e.probability == 0.1
-        assert vertex0.probability == 0.5
-        assert net0.probability == 0.6
+        assert core0.probability == 0.5
+        assert flow0.probability == 0.6
 
-        # Group probability shouldn't override vertex/net probability
+        # Group probability shouldn't override core/flow probability
         e.probability = 1.0
         assert e.probability == 1.0
-        assert vertex0.probability == 0.5
-        assert net0.probability == 0.6
+        assert core0.probability == 0.5
+        assert flow0.probability == 0.6
 
-        # Group+vertex probability should take precidence (but not over nets)
-        vertex0.probability = 10.0
+        # Group+core probability should take precidence (but not over flows)
+        core0.probability = 10.0
         assert e.probability == 1.0
-        assert vertex0.probability == 10.0
-        assert net0.probability == 0.6
+        assert core0.probability == 10.0
+        assert flow0.probability == 0.6
 
-        # Group+net probability should take overall precidence
-        net0.probability = 20.0
+        # Group+flow probability should take overall precidence
+        flow0.probability = 20.0
         assert e.probability == 1.0
-        assert vertex0.probability == 10.0
-        assert net0.probability == 20.0
+        assert core0.probability == 10.0
+        assert flow0.probability == 20.0
 
         # Should be able to get non-exception supporting options
         assert e.record_sent is True
@@ -309,8 +311,8 @@ def test_option_descriptors():
 
     # ...but only within the group
     assert e.probability == 0.1
-    assert vertex0.probability == 0.5
-    assert net0.probability == 0.6
+    assert core0.probability == 0.5
+    assert flow0.probability == 0.6
 
 
 def test_group_num_samples():
@@ -378,26 +380,26 @@ def test_group_labels():
     }
 
 
-def test_new_net():
-    # Make sure nets are created and the arguments are those supported by Rig's
-    # net construct.
+def test_new_flow():
+    # Make sure flows are created and the arguments are those supported by
+    # Rig's Net construct.
     e = Experiment(Mock())
 
-    vertices = [e.new_vertex() for _ in range(10)]
+    cores = [e.new_core() for _ in range(10)]
 
     # Arguments should be passed through
-    net = e.new_net(vertices[0], vertices[1:])
-    assert isinstance(net, Net)
-    assert net.source == vertices[0]
-    assert net.sinks == vertices[1:]
-    assert net.weight == 1.0
+    flow = e.new_flow(cores[0], cores[1:])
+    assert isinstance(flow, RigNet)
+    assert flow.source == cores[0]
+    assert flow.sinks == cores[1:]
+    assert flow.weight == 1.0
 
     # As should kwargs
-    net = e.new_net(source=vertices[0], sinks=vertices[9], weight=123)
-    assert isinstance(net, Net)
-    assert net.source == vertices[0]
-    assert net.sinks == [vertices[9]]
-    assert net.weight == 123
+    flow = e.new_flow(source=cores[0], sinks=cores[9], weight=123)
+    assert isinstance(flow, RigNet)
+    assert flow.source == cores[0]
+    assert flow.sinks == [cores[9]]
+    assert flow.weight == 123
 
 
 def test_machine(monkeypatch):
@@ -561,8 +563,8 @@ def test_place_and_route(record_reinjected):
     assert mock_route.called
     mock_route.reset_mock()
 
-    # Creating a vertex should reset everything
-    vertex = e.new_vertex()
+    # Creating a core should reset everything
+    core = e.new_core()
     e.place_and_route(place=mock_place,
                       allocate=mock_allocate,
                       route=mock_route)
@@ -573,8 +575,8 @@ def test_place_and_route(record_reinjected):
     mock_allocate.reset_mock()
     mock_route.reset_mock()
 
-    # Creating a net should reset the routes
-    e.new_net(vertex, vertex)
+    # Creating a flow should reset the routes
+    e.new_flow(core, core)
     e.place_and_route(place=mock_place,
                       allocate=mock_allocate,
                       route=mock_route)
@@ -584,31 +586,31 @@ def test_place_and_route(record_reinjected):
     mock_route.reset_mock()
 
 
-@pytest.mark.parametrize("router_access_vertex", [True, False])
-def test_construct_vertex_commands(router_access_vertex):
+@pytest.mark.parametrize("router_access_core", [True, False])
+def test_construct_core_commands(router_access_core):
     # XXX: This test is *very* far from being complete. In particular, though
     # the problem supplied is realistic, the output is not checked thouroughly
     # enough.
     e = Experiment(Mock())
 
     # A simple example network as follows:
-    #       n0
-    #  v0 ---+--> v1
-    #   |    '--> v2
-    #   +-------> v3
-    #      n1
-    # We'll pretend all of them are on the same chip and vertex0 is the one
-    # designated as the router-value recording vertex.
+    #       f0
+    #  c0 ---+--> c1
+    #   |    '--> c2
+    #   +-------> c3
+    #      f1
+    # We'll pretend all of them are on the same chip and core0 is the one
+    # designated as the router-value recording core.
 
-    vertex0 = e.new_vertex()
-    vertex1 = e.new_vertex()
-    vertex2 = e.new_vertex()
-    vertex3 = e.new_vertex()
+    core0 = e.new_core()
+    core1 = e.new_core()
+    core2 = e.new_core()
+    core3 = e.new_core()
 
-    vertices = [vertex0, vertex1, vertex2, vertex3]
+    cores = [core0, core1, core2, core3]
 
-    net0 = e.new_net(vertex0, [vertex1, vertex2])
-    net1 = e.new_net(vertex0, vertex3)
+    flow0 = e.new_flow(core0, [core1, core2])
+    flow1 = e.new_flow(core0, core3)
 
     # Seed randomly
     e.seed = None
@@ -628,16 +630,16 @@ def test_construct_vertex_commands(router_access_vertex):
     e.consume = True
     e.router_timeout = 240
 
-    # In group0, everything consumes and n0 sends 100% packets and n1 sends 50%
+    # In group0, everything consumes and f0 sends 100% packets and f1 sends 50%
     # packets.
     with e.new_group():
-        net0.probability = 1.0
-        net1.probability = 0.5
+        flow0.probability = 1.0
+        flow1.probability = 0.5
 
-    # In group1, nothing consumes and n0 and n1 send 100%
+    # In group1, nothing consumes and f0 and f1 send 100%
     with e.new_group():
-        net0.probability = 1.0
-        net1.probability = 1.0
+        flow0.probability = 1.0
+        flow1.probability = 1.0
         e.consume = False
         e.router_timeout = 0
 
@@ -645,84 +647,84 @@ def test_construct_vertex_commands(router_access_vertex):
     with e.new_group():
         e.router_timeout = (16, 16)
 
-    net_keys = {net0: 0xAA00, net1: 0xBB00}
+    flow_keys = {flow0: 0xAA00, flow1: 0xBB00}
 
-    vertices_source_nets = {
-        vertex0: [net0, net1],
-        vertex1: [],
-        vertex2: [],
-        vertex3: [],
+    cores_source_flows = {
+        core0: [flow0, flow1],
+        core1: [],
+        core2: [],
+        core3: [],
     }
-    vertices_sink_nets = {
-        vertex0: [],
-        vertex1: [net0],
-        vertex2: [net0],
-        vertex3: [net1],
+    cores_sink_flows = {
+        core0: [],
+        core1: [flow0],
+        core2: [flow0],
+        core3: [flow1],
     }
 
-    vertex_commands = {
-        vertex: e._construct_vertex_commands(
-            vertex=vertex,
-            source_nets=vertices_source_nets[vertex],
-            sink_nets=vertices_sink_nets[vertex],
-            net_keys=net_keys,
+    core_commands = {
+        core: e._construct_core_commands(
+            core=core,
+            source_flows=cores_source_flows[core],
+            sink_flows=cores_sink_flows[core],
+            flow_keys=flow_keys,
             records=[Counters.deadlines_missed, Counters.sent],
-            router_access_vertex=router_access_vertex).pack()
-        for vertex in vertices
+            router_access_core=router_access_core).pack()
+        for core in cores
     }
 
-    # Make sure all vertices have the right number of sources/sinks set
-    for vertex in vertices:
-        commands = vertex_commands[vertex]
-        num_sources = len(vertices_source_nets[vertex])
-        num_sinks = len(vertices_sink_nets[vertex])
+    # Make sure all cores have the right number of sources/sinks set
+    for core in cores:
+        commands = core_commands[core]
+        num_sources = len(cores_source_flows[core])
+        num_sinks = len(cores_sink_flows[core])
         ref_cmd = struct.pack("<II", NT_CMD.NUM,
                               (num_sources | num_sinks << 16))
         assert ref_cmd in commands
 
-    # Make sure all vertices have the right set of sources and sinks
-    for vertex in vertices:
-        commands = vertex_commands[vertex]
-        sources = vertices_source_nets[vertex]
-        sinks = vertices_sink_nets[vertex]
+    # Make sure all cores have the right set of sources and sinks
+    for core in cores:
+        commands = core_commands[core]
+        sources = cores_source_flows[core]
+        sinks = cores_sink_flows[core]
 
-        for source_num, source_net in enumerate(sources):
+        for source_num, source_flow in enumerate(sources):
             ref_cmd = struct.pack("<II", NT_CMD.SOURCE_KEY | (source_num << 8),
-                                  net_keys[source_net])
+                                  flow_keys[source_flow])
             assert ref_cmd in commands
 
-        for sink_num, sink_net in enumerate(sinks):
+        for sink_num, sink_flow in enumerate(sinks):
             ref_cmd = struct.pack("<II", NT_CMD.SINK_KEY | (sink_num << 8),
-                                  net_keys[sink_net])
+                                  flow_keys[sink_flow])
             assert ref_cmd in commands
 
-    # Make sure all vertices have the right set of timing values
-    for vertex in vertices:
-        commands = vertex_commands[vertex]
+    # Make sure all cores have the right set of timing values
+    for core in cores:
+        commands = core_commands[core]
 
         ref_cmd = struct.pack("<II", NT_CMD.TIMESTEP, 1000)
         assert ref_cmd in commands
 
-    # Make sure all vertices have the right timeout set
-    for vertex in vertices:
-        commands = vertex_commands[vertex]
+    # Make sure all cores have the right timeout set
+    for core in cores:
+        commands = core_commands[core]
 
         ref_cmd0 = struct.pack("<I", NT_CMD.ROUTER_TIMEOUT)
         ref_cmd1 = struct.pack("<I", NT_CMD.ROUTER_TIMEOUT_RESTORE)
-        if router_access_vertex:
+        if router_access_core:
             assert ref_cmd0 in commands
             assert ref_cmd1 in commands
         else:
             assert ref_cmd0 not in commands
             assert ref_cmd1 not in commands
 
-    # Make sure all vertices packet reinjection enabled if requested
-    for vertex in vertices:
-        commands = vertex_commands[vertex]
+    # Make sure all cores packet reinjection enabled if requested
+    for core in cores:
+        commands = core_commands[core]
 
         ref_cmd0 = struct.pack("<I", NT_CMD.REINJECTION_ENABLE)
         ref_cmd1 = struct.pack("<I", NT_CMD.REINJECTION_DISABLE)
-        if router_access_vertex:
+        if router_access_core:
             assert ref_cmd0 in commands
             assert ref_cmd1 in commands
         else:
@@ -730,17 +732,17 @@ def test_construct_vertex_commands(router_access_vertex):
             assert ref_cmd1 not in commands
 
 
-def test_vertex_chip():
-    # Make sure specifying the location of each vertex works
+def test_core_chip():
+    # Make sure specifying the location of each core works
     mock_mc = Mock()
     mock_mc.get_machine.return_value = Machine(2, 2)
 
     e = Experiment(mock_mc)
 
-    v00 = e.new_vertex(chip=(0, 0))
-    v01 = e.new_vertex(chip=(0, 1))
-    v10 = e.new_vertex(chip=(1, 0))
-    v11 = e.new_vertex(chip=(1, 1))
+    v00 = e.new_core(0, 0)
+    v01 = e.new_core(0, 1)
+    v10 = e.new_core(1, 0)
+    v11 = e.new_core(1, 1)
 
     e.place_and_route()
 
@@ -752,120 +754,130 @@ def test_vertex_chip():
     }
 
 
+def test_core_chip_incomplete():
+    # If only X or only Y are specified, things should fail
+    mock_mc = Mock()
+    mock_mc.get_machine.return_value = Machine(2, 2)
+    e = Experiment(mock_mc)
+
+    with pytest.raises(ValueError):
+        e.new_core(chip_x=0)
+    with pytest.raises(ValueError):
+        e.new_core(chip_y=0)
+
+
 @pytest.mark.parametrize("reinjection_used", [True, False])
-def test_add_router_recording_vertices(reinjection_used):
-    # Make sure this internal utility adds extra vertices only when required.
+def test_add_router_recording_cores(reinjection_used):
+    # Make sure this internal utility adds extra cores only when required.
     mock_mc = Mock()
     e = Experiment(mock_mc)
 
     machine = Machine(2, 2)
     mock_mc.get_machine.return_value = machine
 
-    vertex0 = e.new_vertex()
-    vertex1 = e.new_vertex()
-    e.placements = {vertex0: (0, 0),
-                    vertex1: (0, 0)}
+    core0 = e.new_core()
+    core1 = e.new_core()
+    e.placements = {core0: (0, 0),
+                    core1: (0, 0)}
     e.record_sent = True
     e.record_blocked = True
     e.record_received = True
     e.place_and_route()
 
-    # If only recording vertex-specific values, no extra vertices should
-    # appear.
-    (vertices, router_recording_vertices,
+    # If only recording core-specific values, no extra cores should appear.
+    (cores, router_recording_cores,
      placements, allocations, routes) = \
-        e._add_router_recording_vertices()
-    assert vertices == [vertex0, vertex1]
-    assert router_recording_vertices == set()
-    assert placements == {vertex0: (0, 0), vertex1: (0, 0)}
+        e._add_router_recording_cores()
+    assert cores == [core0, core1]
+    assert router_recording_cores == set()
+    assert placements == {core0: (0, 0), core1: (0, 0)}
 
-    # If recording any router registers, a vertex must be allocated on every
+    # If recording any router registers, a core must be allocated on every
     # chip, creating new ones when required.
     e.record_external_multicast = True
     e.reinject_packets = reinjection_used
-    (vertices, router_recording_vertices,
+    (cores, router_recording_cores,
      placements, allocations, routes) =\
-        e._add_router_recording_vertices()
+        e._add_router_recording_cores()
 
-    # Should have three extra vertices, one for each unused chip.
-    assert len(vertices) == 5
+    # Should have three extra cores, one for each unused chip.
+    assert len(cores) == 5
 
-    # The original vertices should still be there
-    assert vertex0 in vertices
-    assert vertex1 in vertices
+    # The original cores should still be there
+    assert core0 in cores
+    assert core1 in cores
 
-    # There should be a router recording vertex on each chip
-    assert sorted(placements[v] for v in router_recording_vertices) == \
+    # There should be a router recording cores on each chip
+    assert sorted(placements[c] for c in router_recording_cores) == \
         sorted(machine)
 
-    # The vertex used on (0, 0) should be one we put there, not a new vertex
-    assert (vertex0 in router_recording_vertices) ^ \
-        (vertex1 in router_recording_vertices)
+    # The core used on (0, 0) should be one we put there, not a new core
+    assert (core0 in router_recording_cores) ^ \
+        (core1 in router_recording_cores)
 
-    # The newly added vertices should be on core 1 unless reinjection is used
+    # The newly added cores should be on core 1 unless reinjection is used
     # in which case they should be on core 2.
     assert all(a[Cores].start == (2 if reinjection_used else 1)
                and a[Cores].stop == (3 if reinjection_used else 2)
-               for v, a in iteritems(allocations)
-               if v not in (vertex0, vertex1))
+               for c, a in iteritems(allocations)
+               if c not in (core0, core1))
 
 
-def test_get_vertex_record_lookup():
+def test_get_core_record_lookup():
     # Make sure this internal utility produces appropriate results.
     e = Experiment(Mock())
 
-    # Two vertices, one will eventually record router values, the other will
-    # not.
-    vertex0 = e.new_vertex()
-    vertex1 = e.new_vertex()
-    vertices = [vertex0, vertex1]
-    placements = {vertex0: (0, 0), vertex1: (0, 0)}
+    # Two cores, one will eventually record router values, the other will not.
+    core0 = e.new_core()
+    core1 = e.new_core()
+    cores = [core0, core1]
+    placements = {core0: (0, 0), core1: (0, 0)}
 
-    # Two nets, one connected loop-back, one connected to the other vertex.
-    net0 = e.new_net(vertex0, vertex0)
-    net1 = e.new_net(vertex0, vertex1)
-    vertices_source_nets = {vertex0: [net0, net1], vertex1: []}
-    vertices_sink_nets = {vertex0: [net0], vertex1: [net1]}
+    # Two flows, one connected loop-back, one connected to the other core.
+    flow0 = e.new_flow(core0, core0)
+    flow1 = e.new_flow(core0, core1)
+    cores_source_flows = {core0: [flow0, flow1], core1: []}
+    cores_sink_flows = {core0: [flow0], core1: [flow1]}
 
     # If nothing is being recorded, the sets should just contain permanent
     # counters
-    vertices_records = e._get_vertex_record_lookup(
-        vertices, set(), placements, vertices_source_nets, vertices_sink_nets)
-    assert vertices_records == {
-        vertex0: [(vertex0, Counters.deadlines_missed)],
-        vertex1: [(vertex1, Counters.deadlines_missed)],
+    cores_records = e._get_core_record_lookup(
+        cores, set(), placements, cores_source_flows, cores_sink_flows)
+    assert cores_records == {
+        core0: [(core0, Counters.deadlines_missed)],
+        core1: [(core1, Counters.deadlines_missed)],
     }
 
-    # If only vertex counters are being used, they should be included
+    # If only core counters are being used, they should be included
     e.record_sent = True
     e.record_received = True
-    vertices_records = e._get_vertex_record_lookup(
-        vertices, set(), placements, vertices_source_nets, vertices_sink_nets)
-    assert vertices_records == {
-        vertex0: [(vertex0, Counters.deadlines_missed),
-                  (net0, Counters.sent), (net1, Counters.sent),
-                  (net0, Counters.received)],
-        vertex1: [(vertex1, Counters.deadlines_missed),
-                  (net1, Counters.received)],
+    cores_records = e._get_core_record_lookup(
+        cores, set(), placements, cores_source_flows, cores_sink_flows)
+    assert cores_records == {
+        core0: [(core0, Counters.deadlines_missed),
+                (flow0, Counters.sent), (flow1, Counters.sent),
+                (flow0, Counters.received)],
+        core1: [(core1, Counters.deadlines_missed),
+                (flow1, Counters.received)],
     }
 
     # If any routing table entries are present, they should be added to
-    # anything in the router_recording_vertices lookup.
-    router_recording_vertices = set([vertex0])
+    # anything in the router_recording_cores lookup.
+    router_recording_cores = set([core0])
     e.record_external_multicast = True
-    vertices_records = e._get_vertex_record_lookup(
-        vertices,
-        router_recording_vertices,
+    cores_records = e._get_core_record_lookup(
+        cores,
+        router_recording_cores,
         placements,
-        vertices_source_nets,
-        vertices_sink_nets)
-    assert vertices_records == {
-        vertex0: [(vertex0, Counters.deadlines_missed),
-                  ((0, 0), Counters.external_multicast),
-                  (net0, Counters.sent), (net1, Counters.sent),
-                  (net0, Counters.received)],
-        vertex1: [(vertex1, Counters.deadlines_missed),
-                  (net1, Counters.received)],
+        cores_source_flows,
+        cores_sink_flows)
+    assert cores_records == {
+        core0: [(core0, Counters.deadlines_missed),
+                ((0, 0), Counters.external_multicast),
+                (flow0, Counters.sent), (flow1, Counters.sent),
+                (flow0, Counters.received)],
+        core1: [(core1, Counters.deadlines_missed),
+                (flow1, Counters.received)],
     }
 
 
@@ -874,14 +886,14 @@ def test_get_vertex_record_lookup():
                          [[],  # No groups
                           [1],
                           [1, 100]])
-@pytest.mark.parametrize("num_vertices", [0, 1, 2])
-@pytest.mark.parametrize("num_nets_per_vertex", [0, 1, 2])
+@pytest.mark.parametrize("num_cores", [0, 1, 2])
+@pytest.mark.parametrize("num_flows_per_core", [0, 1, 2])
 @pytest.mark.parametrize("error,error_code", [(False, b"\0\0\0\0"),
                                               (True, b"\x20\0\0\0")])
 @pytest.mark.parametrize("record", [True, False])
 @pytest.mark.parametrize("reinject_packets", [True, False])
-def test_run(auto_create_group, samples_per_group, num_vertices,
-             num_nets_per_vertex, error, error_code, record, reinject_packets):
+def test_run(auto_create_group, samples_per_group, num_cores,
+             num_flows_per_core, error, error_code, record, reinject_packets):
     """Make sure that the run command carries out an experiment as would be
     expected."""
     machine = Machine(3, 1)
@@ -900,8 +912,8 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
         # If reinjecting, a core is added to every chip
         mock_mc.wait_for_cores_to_reach_state.return_value = len(list(machine))
     else:
-        # If not reinjecting, only the vertices are given cores
-        mock_mc.wait_for_cores_to_reach_state.return_value = num_vertices
+        # If not reinjecting, only the user-defined cores exist
+        mock_mc.wait_for_cores_to_reach_state.return_value = num_cores
 
     def mock_sdram_file_read(size):
         return error_code + b"\0"*(size - 4)
@@ -917,31 +929,31 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
     e.cooldown = 0.01
     e.flush_time = 0.01
 
-    # Record the result of _construct_vertex_commands to allow checking of
+    # Record the result of _construct_core_commands to allow checking of
     # memory allocation sizes
-    construct_vertex_commands = e._construct_vertex_commands
-    vertices_commands = {}
+    construct_core_commands = e._construct_core_commands
+    cores_commands = {}
 
-    def wrapped_construct_vertex_commands(vertex, *args, **kwargs):
-        commands = construct_vertex_commands(vertex=vertex, *args, **kwargs)
-        vertices_commands[vertex] = commands
+    def wrapped_construct_core_commands(core, *args, **kwargs):
+        commands = construct_core_commands(core=core, *args, **kwargs)
+        cores_commands[core] = commands
         return commands
-    e._construct_vertex_commands = Mock(
-        side_effect=wrapped_construct_vertex_commands)
+    e._construct_core_commands = Mock(
+        side_effect=wrapped_construct_core_commands)
 
     if record:
         e.record_sent = True
 
     e.reinject_packets = reinject_packets
 
-    # Create example vertices
-    vertices = [e.new_vertex() for _ in range(num_vertices)]
-    for v in vertices:
-        for _ in range(num_nets_per_vertex):
-            e.new_net(v, v)
+    # Create example cores
+    cores = [e.new_core() for _ in range(num_cores)]
+    for c in cores:
+        for _ in range(num_flows_per_core):
+            e.new_flow(c, c)
 
-    # Vertices are placed on sequential chips along the x-axis
-    e.placements = {v: (x, 0) for x, v in enumerate(vertices)}
+    # Cores are placed on sequential chips along the x-axis
+    e.placements = {c: (x, 0) for x, c in enumerate(cores)}
 
     # Create example groups
     for num_samples in samples_per_group:
@@ -949,7 +961,7 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
             e.record_interval = e.duration / float(num_samples)
 
     # The run should fail with an exception when expected.
-    if error and (num_vertices > 0 or reinject_packets):
+    if error and (num_cores > 0 or reinject_packets):
         with pytest.raises(NetworkTesterError) as exc_info:
             e.run(0x33, create_group_if_none_exist=auto_create_group)
         results = exc_info.value.results
@@ -961,7 +973,7 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
 
     # The results returned should be all zeros (since that is what was written
     # back)
-    if record and num_vertices > 0 and num_nets_per_vertex > 0:
+    if record and num_cores > 0 and num_flows_per_core > 0:
         assert sum(results.totals()["sent"]) == 0
 
     # The supplied app ID should be used
@@ -975,14 +987,14 @@ def test_run(auto_create_group, samples_per_group, num_vertices,
     else:
         assert not reinjector_loaded
 
-    # Each chip should have been issued with a suitable malloc for any vertices
+    # Each chip should have been issued with a suitable malloc for any cores
     # on it.
-    for x, vertex in enumerate(vertices):
-        cmds_size = vertices_commands[vertex].size
+    for x, core in enumerate(cores):
+        cmds_size = cores_commands[core].size
         if record:
             # The space required to record deadlines_missed and the sent
             # counters.
-            result_size = (1 + ((1 + num_nets_per_vertex) *
+            result_size = (1 + ((1 + num_flows_per_core) *
                                 sum(samples_per_group))) * 4
         else:
             # Just the status value and deadlines_missed
@@ -1035,7 +1047,7 @@ def test_run_callbacks():
     e.cooldown = 0.01
     e.flush_time = 0.01
 
-    # Enough to cause a recording vertex to be added to every chip
+    # Enough to cause a recording core to be added to every chip
     e.record_dropped_multicast = True
 
     # Create a number of groups

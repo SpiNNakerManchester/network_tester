@@ -1,6 +1,6 @@
 """A high level SpiNNaker network tester/traffic generator."""
 
-from .experiment import Experiment, Vertex, Net, Group
+from .experiment import Experiment, Core, Flow, Group
 
 from .results import Results
 

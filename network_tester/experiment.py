@@ -42,29 +42,26 @@ logger = logging.getLogger(__name__)
 class Experiment(object):
     """Defines a network experiment to be run on a SpiNNaker machine.
 
-    An experiment consists of a fixed set of 'vertices'
-    (:py:meth:`.new_vertex`) connected together by 'nets'
-    (:py:meth:`.new_net`). Vertices correspond with SpiNNaker application cores
-    running artificial traffic generators and the nets correspond with traffic
-    flows between cores.
+    An experiment consists of a defined set of SpiNNaker application cores
+    (:py:meth:`.new_core`) between which traffic flows (:py:meth:`.new_flow`).
 
     An experiment is broken up into 'groups' (:py:meth:`.new_group`), during
     which the traffic generators produce packets according to a specified
     traffic pattern. Within each group, metrics, such as packet counts, may be
-    recorded. Though the placement of vertices and the routing of nets is
-    fixed throughout an experiment, the rate and pattern with which which
-    packets are produced can be varied between groups allowing, for example,
-    different traffic patterns to be tested.
+    recorded. Though the placement of cores and the routing of traffic flows is
+    fixed throughout an experiment, the rate and pattern of the generated
+    traffic flows can be varied between groups allowing, for example, different
+    traffic patterns to be tested.
 
-    When the experiment is :py:meth:`.run`, appropriately-configured traffic
-    generator applications will be loaded onto SpiNNaker and, after the
-    experiment completes, the results are read back ready for analysis.
+    When the experiment is :py:meth:`.run`, cores will be loaded with traffic
+    generators and the routing tables initialised. When the experiment
+    completes, recorded results are read back ready for analysis.
     """
 
     def __init__(self, hostname_or_machine_controller):
         """Create a new network experiment on a particular SpiNNaker machine.
 
-        Example usage::
+        Typical usage::
 
             >>> import sys
             >>> from network_tester import Experiment
@@ -75,7 +72,7 @@ class Experiment(object):
 
             >>> e = Experiment(...)
             >>> # Set the probability of a packet being generated at the source
-            >>> # of each net every timestep
+            >>> # of each flow every timestep
             >>> e.probability = 1.0
 
         Parameters
@@ -96,7 +93,7 @@ class Experiment(object):
         self._machine = None
 
         # A set of placements, allocations and routes for the
-        # traffic-generating/consuming vertices.
+        # traffic-generating/consuming cores.
         self._placements = None
         self._allocations = None
         self._routes = None
@@ -108,26 +105,25 @@ class Experiment(object):
         # A list of experimental groups which have been defined
         self._groups = []
 
-        # A list of vertices in the experiment
-        self._vertices = []
+        # A list of cores in the experiment
+        self._cores = []
 
-        # A list of nets in the experiment
-        self._nets = []
+        # A list of flows in the experiment
+        self._flows = []
 
         # Holds the value of every option along with any special cases.
         # If a value can have per-node or per-group exceptions it is stored as
-        # a dictionary with keys (group, vert_or_net) with the value being
+        # a dictionary with keys (group, core_or_flow) with the value being
         # defined as below. Otherwise, the value is just stored immediately in
         # the _values dictionary. The list below gives the order of priority
         # for definitions.
         # * (None, None) The global default
         # * (group, None) The default for a particular experimental group
-        # * (None, vertex) The default for a particular vertex
-        # * (None, net) The default for a particular net
-        # * (group, vertex) The value for a particular vertex in a specific
-        #   group
-        # * (group, net) The value for a particular net in a specific group
-        # {option: value or {(group, vert_or_net): value, ...}, ...}
+        # * (None, core) The default for a particular core
+        # * (None, flow) The default for a particular flow
+        # * (group, core) The value for a particular core in a specific group
+        # * (group, flow) The value for a particular flow in a specific group
+        # {option: value or {(group, core_or_flow): value, ...}, ...}
         self._values = {
             "seed": {(None, None): None},
             "timestep": {(None, None): 0.001},
@@ -153,116 +149,128 @@ class Experiment(object):
             if not counter.permanent_counter:
                 self._values["record_{}".format(counter.name)] = False
 
-    def new_vertex(self, name=None, chip=None):
-        """Create a new :py:class:`Vertex`.
+    def new_core(self, chip_x=None, chip_y=None, name=None):
+        """Create a new :py:class:`Core`.
 
-        A vertex corresponds with a SpiNNaker application core and can produce
-        or consume SpiNNaker packets.
+        A SpiNNaker application core which can source and sink a number of
+        traffic :py:meth:`flows<new_flow>`.
 
         Example::
 
-            >>> # Create three vertices
-            >>> v0 = e.new_vertex()
-            >>> v1 = e.new_vertex()
-            >>> v2 = e.new_vertex()
+            >>> # Create three cores, the first two are placed on chip (0, 0)
+            >>> # and final core will be placed automatically onto some
+            >>> # available core in the system.
+            >>> c0 = e.new_core(0, 0)
+            >>> c1 = e.new_core(0, 0)
+            >>> c2 = e.new_core()
 
-        The experimental parameters for each vertex can also be overridden
+        The experimental parameters for each core can also be specified
         individually if desired::
 
-            >>> # Nets sourced at vertex v2 will transmit with 50% probability
-            >>> # each timestep
-            >>> v2.probability = 0.5
+            >>> # Traffice flows sourced at core c2 will transmit with 50%
+            >>> # probability each timestep
+            >>> c2.probability = 0.5
 
         Parameters
         ----------
-        name
-            *Optional.* A name for the vertex. If not specified the vertex will
-            be given a number as its name. This name will be used in results
-            tables.
-        chip : (x, y) or None
-            If a tuple (x, y) is given, this vertex will be placed on the chip
-            with the specified coordinates. Note: A vertex represents whole
-            SpiNNaker core therefore there is a limit on the number of vertices
-            which may be placed on a given chip.
+        chip_x : int or None
+        chip_y : int or None
+            If both ``chip_x`` and ``chip_y`` are given, this core will be
+            placed on the chip with the specified coordinates. Note: It is not
+            possible to place more cores on a specific chip than the chip has
+            available.
 
-            If None (the default), the vertex will be automatically placed on
-            some available chip (see
+            If both ``chip_x`` and ``chip_y`` are None (the default), the core
+            will be automatically placed on some available chip (see
             :py:meth:`network_tester.Experiment.place_and_route`).
 
-        Returns
-        -------
-        :py:class:`Vertex`
-            An object representing the vertex.
-        """
-        v = Vertex(self,
-                   name if name is not None else len(self._vertices),
-                   chip)
-        self._vertices.append(v)
-
-        # Adding a new vertex invalidates any existing placement solution
-        self.placements = None
-
-        return v
-
-    def new_net(self, source, sinks, weight=1.0, name=None):
-        """Create a new net.
-
-        A net represents a flow of SpiNNaker packets from one source vertex to
-        many sink vertices.
-
-        For example::
-
-            >>> # A net with v0 as a source and v1 as a sink.
-            >>> n0 = e.new_net(v0, v1)
-
-            >>> # Another net with v0 as a source and both v1 and v2 as sinks.
-            >>> n1 = e.new_net(v0, [v1, v2])
-
-        The experimental parameters for each net can also be overridden
-        individually if desired. This will take precedence over any overridden
-        values set for the source vertex of the net.
-
-        For example::
-
-            >>> # Net n0 will generate a packet in 80% of timesteps
-            >>> n0.probability = 0.8
-
-        Parameters
-        ----------
-        source : :py:class:`Vertex`
-            The source :py:class:`Vertex` of the net. A stream of packets will
-            be generated by this vertex and sent to all sinks.
-
-            Only :py:class:`Vertex` objects created by this
-            :py:class:`Experiment` may be used.
-        sinks : :py:class:`Vertex` or [:py:class:`Vertex`, ...]
-            The sink :py:class:`Vertex` or list of sink vertices for the net.
-
-            Only :py:class:`Vertex` objects created by this
-            :py:class:`Experiment` may be used.
-        weight : float
-            *Optional.* A hint for place and route tools indicating the
-            relative amount of traffic that may flow through this net. This
-            number is not used by the traffic generator.
+            Note that either both must be an integer or both must be None.
         name
-            *Optional.* A name for the net. If not specified the net will be
+            *Optional.* A name for the core. If not specified the core will be
             given a number as its name. This name will be used in results
             tables.
 
         Returns
         -------
-        :py:class:`Net`
-            An object representing the net.
+        :py:class:`Core`
+            An object representing the core.
+        """
+        if chip_x is not None and chip_y is not None:
+            chip = (chip_x, chip_y)
+        elif chip_x is None and chip_y is None:
+            chip = None
+        else:
+            raise ValueError(
+                "Either both or neither of chip_x and chip_y may be None.")
+
+        c = Core(self,
+                 name if name is not None else len(self._cores),
+                 chip)
+        self._cores.append(c)
+
+        # Adding a new core invalidates any existing placement solution
+        self.placements = None
+
+        return c
+
+    def new_flow(self, source, sinks, weight=1.0, name=None):
+        """Create a new flow.
+
+        A flow of SpiNNaker packets from one source core to many sink cores.
+
+        For example::
+
+            >>> # A flow with c0 as a source and c1 as a sink.
+            >>> f0 = e.new_flow(c0, c1)
+
+            >>> # Another flow with c0 as a source and both c1 and c2 as sinks.
+            >>> f1 = e.new_flow(c0, [c1, c2])
+
+        The experimental parameters for each flow can be overridden
+        individually if desired. This will take precedence over any values set
+        for the source core of the flow.
+
+        For example::
+
+            >>> # Flow f0 will generate a packet in 80% of timesteps
+            >>> f0.probability = 0.8
+
+        Parameters
+        ----------
+        source : :py:class:`Core`
+            The source :py:class:`Core` of the flow. A stream of packets will
+            be generated by this core and sent to all sinks.
+
+            Only :py:class:`Core` objects created by this
+            :py:class:`Experiment` may be used.
+        sinks : :py:class:`Core` or [:py:class:`Core`, ...]
+            The sink :py:class:`Core` or list of sink cores for the flow.
+
+            Only :py:class:`Core` objects created by this
+            :py:class:`Experiment` may be used.
+        weight : float
+            *Optional.* A hint for the automatic place and route algorithms
+            indicating the relative amount of traffic that may flow through
+            this Flow. This number is not used by the traffic generator.
+        name
+            *Optional.* A name for the flow. If not specified the flow will be
+            given a number as its name. This name will be used in results
+            tables.
+
+        Returns
+        -------
+        :py:class:`Flow`
+            An object representing the flow.
         """
         if name is None:
-            name = len(self._nets)
-        n = Net(self, name, source, sinks, weight)
+            name = len(self._flows)
+        f = Flow(self, name, source, sinks, weight)
 
-        # Adding a new net invalidates any routing solution.
+        # Adding a new flow invalidates any routing solution.
         self.routes = None
 
-        self._nets.append(n)
-        return n
+        self._flows.append(f)
+        return f
 
     def new_group(self, name=None):
         """Define a new experimental group.
@@ -274,9 +282,9 @@ class Experiment(object):
 
         The returned :py:class:`Group` object can be used as a context manager
         within which experimental parameters specific to that group may be set,
-        including per-vertex and per-net parameters. Note that parameters set
+        including per-core and per-flow parameters. Note that parameters set
         globally for the experiment in particular group do not take precedence
-        over per-vertex or per-net parameter settings.
+        over per-core or per-flow parameter settings.
 
         For example::
 
@@ -284,10 +292,10 @@ class Experiment(object):
             ...     # Overrides default probability of sending a packet within
             ...     # the group.
             ...     e.probability = 0.5
-            ...     # Overrides the probability for v2 within the group
-            ...     v2.probability = 0.25
-            ...     # Overrides the probability for n0 within the group
-            ...     n0.probability = 0.4
+            ...     # Overrides the probability for c2 within the group
+            ...     c2.probability = 0.25
+            ...     # Overrides the probability for f0 within the group
+            ...     f0.probability = 0.4
 
         Parameters
         ----------
@@ -310,9 +318,9 @@ class Experiment(object):
             before_read_results=None):
         """Run the experiment on SpiNNaker and return the results.
 
-        If placements, allocations or routes have not been provided, the
-        vertices and nets will be automatically placed, allocated and routed
-        using the default algorithms in Rig.
+        If placements, allocations or routes have not been provided, the cores
+        and flows will be automatically placed and routed using the default
+        algorithms in Rig.
 
         Following placement, the experimental parameters are loaded onto the
         machine and each experimental group is executed in turn. Results are
@@ -320,7 +328,7 @@ class Experiment(object):
 
         .. warning::
             Though a global synchronisation barrier is used between the
-            execution of each group, the timers in each vertex may drift out of
+            execution of each group, the timers in each core may drift out of
             sync during each group's execution. Further, the barrier
             synchronisation does not give any guarantees about how
             closely-synchronised the timers will be at the start of each run.
@@ -366,17 +374,18 @@ class Experiment(object):
         Returns
         -------
         :py:class:`Results`
-            If no vertices reported errors, the experimental results are
-            returned.  See the :py:class:`Results` object for details.
+            If no cores reported errors, the experimental results are returned.
+            See the :py:class:`Results` object for details.
 
         Raises
         ------
         NetworkTesterError
-            A :py:exc:`NetworkTesterError` is raised if any vertices reported
-            an error. The most common error is likely to be a 'deadline missed'
+            A :py:exc:`NetworkTesterError` is raised if any cores reported an
+            error. The most common error is likely to be a 'deadline missed'
             error as a result of the experimental timestep being too short or
-            the load on some vertices too high in extreme circumstances. Other
-            types of error indicate far more severe problems.
+            the load on some cores too high in extreme circumstances. Other
+            types of error indicate far more severe problems and are probably a
+            bug in 'Network Tester'.
 
             Any results recorded during the run will be included in the
             ``results`` attribute of the exception. See the :py:class:`Results`
@@ -386,76 +395,76 @@ class Experiment(object):
         if create_group_if_none_exist and len(self._groups) == 0:
             self.new_group()
 
-        # Place and route the vertices (if required)
+        # Place and route the cores (if required)
         self.place_and_route()
 
         # Add nodes to unused chips to access router registers/counters (if
         # necessary).
-        (vertices, router_access_vertices,
+        (cores, router_access_cores,
          placements, allocations, routes) = \
-            self._add_router_recording_vertices()
+            self._add_router_recording_cores()
 
-        # Assign a unique routing key to each net
-        net_keys = {net: num << 8
-                    for num, net in enumerate(self._nets)}
+        # Assign a unique routing key to each flow
+        flow_keys = {flow: num << 8
+                     for num, flow in enumerate(self._flows)}
         routing_tables = build_routing_tables(
             routes,
-            {net: (key, 0xFFFFFF00) for net, key in iteritems(net_keys)})
+            {flow: (key, 0xFFFFFF00) for flow, key in iteritems(flow_keys)})
 
         network_tester_binary = pkg_resources.resource_filename(
             "network_tester", "binaries/network_tester.aplx")
         reinjector_binary = pkg_resources.resource_filename(
             "network_tester", "binaries/reinjector.aplx")
 
-        # Specify the appropriate binary for the network tester vertices.
+        # Specify the appropriate binary for the network tester cores.
         application_map = build_application_map(
-            {vertex: network_tester_binary for vertex in vertices},
+            {core: network_tester_binary for core in cores},
             placements, allocations)
 
-        # Get the set of source and sink nets for each vertex. Also sets an
+        # Get the set of source and sink flows for each core. Also sets an
         # explicit ordering of the sources/sinks within each.
-        # {vertex: [source_or_sink, ...], ...}
-        vertices_source_nets = {v: [] for v in vertices}
-        vertices_sink_nets = {v: [] for v in vertices}
-        for net in self._nets:
-            vertices_source_nets[net.source].append(net)
-            for sink in net.sinks:
-                vertices_sink_nets[sink].append(net)
+        # {core: [source_or_sink, ...], ...}
+        cores_source_flows = {c: [] for c in cores}
+        cores_sink_flows = {c: [] for c in cores}
+        for flow in self._flows:
+            cores_source_flows[flow.source].append(flow)
+            for sink in flow.sinks:
+                cores_sink_flows[sink].append(flow)
         # Sort all sink lists by key to allow binary-searching in the
         # network_tester application
-        for sink_nets in itervalues(vertices_sink_nets):
-            sink_nets.sort(key=(lambda n: net_keys[n]))
+        for sink_flows in itervalues(cores_sink_flows):
+            sink_flows.sort(key=(lambda f: flow_keys[f]))
 
-        vertices_records = self._get_vertex_record_lookup(
-            vertices, router_access_vertices, placements,
-            vertices_source_nets, vertices_sink_nets)
+        cores_records = self._get_core_record_lookup(
+            cores, router_access_cores, placements,
+            cores_source_flows, cores_sink_flows)
 
-        # Fill out the set of commands for each vertex
+        # Fill out the set of commands for each core
         logger.info("Generating SpiNNaker configuration data...")
-        vertices_commands = {
-            vertex: self._construct_vertex_commands(
-                vertex=vertex,
-                source_nets=vertices_source_nets[vertex],
-                sink_nets=vertices_sink_nets[vertex],
-                net_keys=net_keys,
-                records=[cntr for obj, cntr in vertices_records[vertex]],
-                router_access_vertex=vertex in router_access_vertices)
-            for vertex in vertices
+        cores_commands = {
+            core: self._construct_core_commands(
+                core=core,
+                source_flows=cores_source_flows[core],
+                sink_flows=cores_sink_flows[core],
+                flow_keys=flow_keys,
+                records=[cntr for obj, cntr in cores_records[core]],
+                router_access_core=core in router_access_cores)
+            for core in cores
         }
 
-        # The data size for the results from each vertex
+        # The data size for the results from each core
         total_num_samples = sum(g.num_samples for g in self._groups)
-        vertices_result_size = {
-            vertex: (
+        cores_result_size = {
+            core: (
                 # The error flag (one word)
                 1 +
                 # One word per recorded value per sample.
-                (total_num_samples * len(vertices_records[vertex]))
+                (total_num_samples * len(cores_records[core]))
             ) * 4
-            for vertex in vertices}
+            for core in cores}
 
-        # The raw result data for each vertex.
-        vertices_result_data = {}
+        # The raw result data for each core.
+        cores_result_data = {}
 
         if before_load is not None:
             before_load(self)
@@ -464,25 +473,25 @@ class Experiment(object):
         with self._mc.application(app_id):
             # Allocate SDRAM. This is enough to fit the commands and also any
             # recored results.
-            vertices_sdram = {}
+            cores_sdram = {}
             logger.info("Allocating SDRAM...")
-            for vertex in vertices:
+            for core in cores:
                 size = max(
                     # Size of commands (with length prefix)
-                    vertices_commands[vertex].size,
+                    cores_commands[core].size,
                     # Size of results (plus the flags)
-                    vertices_result_size[vertex],
+                    cores_result_size[core],
                 )
-                x, y = placements[vertex]
-                p = allocations[vertex][Cores].start
-                vertices_sdram[vertex] = self._mc.sdram_alloc_as_filelike(
+                x, y = placements[core]
+                p = allocations[core][Cores].start
+                cores_sdram[core] = self._mc.sdram_alloc_as_filelike(
                     size, x=x, y=y, tag=p)
 
-            # Load each vertex's commands
+            # Load each core's commands
             logger.info("Loading {} bytes of commands...".format(
-                sum(c.size for c in itervalues(vertices_commands))))
-            for vertex, sdram in iteritems(vertices_sdram):
-                sdram.write(vertices_commands[vertex].pack())
+                sum(c.size for c in itervalues(cores_commands))))
+            for core, sdram in iteritems(cores_sdram):
+                sdram.write(cores_commands[core].pack())
 
             # Load routing tables
             logger.info("Loading routing tables...")
@@ -499,7 +508,7 @@ class Experiment(object):
 
             # Load the application
             logger.info("Loading application on to {} cores...".format(
-                len(vertices)))
+                len(cores)))
             self._mc.load_application(application_map)
 
             # Run through each experimental group
@@ -508,8 +517,8 @@ class Experiment(object):
                 # Reach the barrier before the run starts
                 logger.info("Waiting for barrier...")
                 num_at_barrier = self._mc.wait_for_cores_to_reach_state(
-                    next_barrier, len(vertices), timeout=10.0)
-                assert num_at_barrier == len(vertices), \
+                    next_barrier, len(cores), timeout=10.0)
+                assert num_at_barrier == len(cores), \
                     "Not all cores reached the barrier " \
                     "before {}.".format(group)
 
@@ -535,8 +544,8 @@ class Experiment(object):
             # Wait for all cores to exit after their final run
             logger.info("Waiting for barrier...")
             num_at_barrier = self._mc.wait_for_cores_to_reach_state(
-                "exit", len(vertices), timeout=10.0)
-            assert num_at_barrier == len(vertices), \
+                "exit", len(cores), timeout=10.0)
+            assert num_at_barrier == len(cores), \
                 "Not all cores reached the final barrier."
 
             if before_read_results is not None:
@@ -544,16 +553,16 @@ class Experiment(object):
 
             # Read recorded data back
             logger.info("Reading back {} bytes of results...".format(
-                sum(itervalues(vertices_result_size))))
-            for vertex, sdram in iteritems(vertices_sdram):
+                sum(itervalues(cores_result_size))))
+            for core, sdram in iteritems(cores_sdram):
                 sdram.seek(0)
-                vertices_result_data[vertex] = \
-                    sdram.read(vertices_result_size[vertex])
+                cores_result_data[core] = \
+                    sdram.read(cores_result_size[core])
 
         # Process read results
-        results = Results(self, self._vertices, self._nets, vertices_records,
-                          router_access_vertices, placements, routes,
-                          vertices_result_data, self._groups)
+        results = Results(self, self._cores, self._flows, cores_records,
+                          router_access_cores, placements, routes,
+                          cores_result_data, self._groups)
         if any(not e.is_deadline if ignore_deadline_errors else True
                for e in results.errors):
             logger.error(
@@ -568,11 +577,11 @@ class Experiment(object):
                         place=place, place_kwargs={},
                         allocate=allocate, allocate_kwargs={},
                         route=route, route_kwargs={}):
-        """Place and route the vertices and nets in the current experiment, if
+        """Place and route the cores and flows in the current experiment, if
         required.
 
-        If extra control is required over placement and routing of vertices and
-        nets in an experiment, this method allows additional constraints and
+        If extra control is required over placement and routing of cores and
+        flows in an experiment, this method allows additional constraints and
         custom placement, allocation and routing options and algorithms to be
         used.
 
@@ -594,7 +603,7 @@ class Experiment(object):
             A list of additional constraints to apply. A
             :py:class:`rig.place_and_route.constraints.ReserveResourceConstraint`
             will be applied to reserve the monitor processor on top of this
-            constraint along with location constraints for all vertices whose
+            constraint along with location constraints for all cores whose
             chip has been specified.
         place : placer
             A Rig-API complaint placement algorithm.
@@ -614,18 +623,18 @@ class Experiment(object):
         """
         # Each traffic generator consumes a core and a negligible amount of
         # memory.
-        vertices_resources = {vertex: {Cores: 1} for vertex in
-                              self._vertices}
+        vertices_resources = {core: {Cores: 1} for core in
+                              self._cores}
 
         # Reserve the monitor processor for each chip
         constraints = constraints or []
         constraints += [ReserveResourceConstraint(Cores, slice(0, 1))]
 
-        # Force the placements of vertices whose positions are pre-defined
+        # Force the placements of cores whose positions are pre-defined
         constraints.extend(
-            LocationConstraint(vertex, vertex.chip)
-            for vertex in self._vertices
-            if vertex.chip is not None
+            LocationConstraint(core, core.chip)
+            for core in self._cores
+            if core.chip is not None
         )
 
         # Reserve a core for packet reinjection on each chip (if required)
@@ -633,9 +642,9 @@ class Experiment(object):
             constraints += [ReserveResourceConstraint(Cores, slice(1, 2))]
 
         if self.placements is None:
-            logger.info("Placing vertices...")
+            logger.info("Placing cores...")
             self.placements = place(vertices_resources=vertices_resources,
-                                    nets=self._nets,
+                                    nets=self._flows,
                                     machine=self.machine,
                                     constraints=constraints,
                                     **place_kwargs)
@@ -643,9 +652,9 @@ class Experiment(object):
             self.routes = None
 
         if self.allocations is None:
-            logger.info("Allocating vertices...")
+            logger.info("Allocating cores...")
             self.allocations = allocate(vertices_resources=vertices_resources,
-                                        nets=self._nets,
+                                        nets=self._flows,
                                         machine=self.machine,
                                         constraints=constraints,
                                         placements=self.placements,
@@ -653,9 +662,9 @@ class Experiment(object):
             self.routes = None
 
         if self.routes is None:
-            logger.info("Routing vertices...")
+            logger.info("Routing flows...")
             self.routes = route(vertices_resources=vertices_resources,
-                                nets=self._nets,
+                                nets=self._flows,
                                 machine=self.machine,
                                 constraints=constraints,
                                 placements=self.placements,
@@ -664,12 +673,12 @@ class Experiment(object):
 
     @property
     def placements(self):
-        """A dictionary {:py:class:`Vertex`: (x, y), ...}, or None.
+        """A dictionary {:py:class:`Core`: (x, y), ...}, or None.
 
-        Defines the chip on which each vertex will be placed during the
+        Defines the chip on which each core will be placed during the
         experiment. Note that the placement must define the position of *every*
-        vertex. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
-        will cause all vertices to be placed automatically.
+        core. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
+        will cause all cores to be placed automatically.
 
         Setting this attribute will also set :py:attr:`.allocations` and
         :py:attr:`.routes` to None.
@@ -692,13 +701,13 @@ class Experiment(object):
 
     @property
     def allocations(self):
-        """A dictionary {:py:class:`Vertex`: {resource: slice}, ...} or None.
+        """A dictionary {:py:class:`Core`: {resource: slice}, ...} or None.
 
-        Defines the resources allocated to each vertex. This must include
+        Defines the resources allocated to each core. This must include
         exactly 1 unit of the :py:class:`~rig.machine.Cores` resource.  Note
         that the allocation must define the resource allocation of *every*
-        vertex. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
-        will cause all vertices to have their resources allocated
+        core. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
+        will cause all cores to have their resources allocated
         automatically.
 
         Setting this attribute will also set :py:attr:`.routes` to None.
@@ -720,12 +729,12 @@ class Experiment(object):
 
     @property
     def routes(self):
-        """A dictionary {:py:class:`Net`: \
+        """A dictionary {:py:class:`Flow`: \
         :py:class:`rig.place_and_route.routing_tree.RoutingTree`, ...} or None.
 
-        Defines the route used for each net.  Note that the route must be
-        defined for *every* net. If None, calling :py:meth:`.run` or
-        :py:meth:`.place_and_route` will cause all nets to be routed
+        Defines the route used for each flow.  Note that the route must be
+        defined for *every* flow. If None, calling :py:meth:`.run` or
+        :py:meth:`.place_and_route` will cause all flows to be routed
         automatically.
 
         See also :py:func:`rig.place_and_route.route`.
@@ -773,34 +782,34 @@ class Experiment(object):
     def machine(self, value):
         self._machine = value
 
-    def _construct_vertex_commands(self, vertex, source_nets, sink_nets,
-                                   net_keys, records, router_access_vertex):
-        """For internal use. Produce the Commands for a particular vertex.
+    def _construct_core_commands(self, core, source_flows, sink_flows,
+                                 flow_keys, records, router_access_core):
+        """For internal use. Produce the Commands for a particular core.
 
         Parameters
         ----------
-        vertex : :py:class:`.Vertex`
-            The vertex to pack
-        source_nets : [:py:class:`.Net`, ...]
-            The nets which are sourced at this vertex.
-        sink_nets : [:py:class:`.Net`, ...]
-            The nets which are sunk at this vertex.
-        net_keys : {:py:class:`.Net`: key, ...}
-            A mapping from net to routing key.
+        core : :py:class:`.Core`
+            The core to pack
+        source_flows : [:py:class:`.Flow`, ...]
+            The flows which are sourced at this core.
+        sink_flows : [:py:class:`.Flow`, ...]
+            The flows which are sunk at this core.
+        flow_keys : {:py:class:`.Flow`: key, ...}
+            A mapping from flow to routing key.
         records : [counter, ...]
-            The set of counters this vertex records
-        router_access_vertex : bool
-            Should this vertex be used to configure router/reinjector
+            The set of counters this core records
+        router_access_core : bool
+            Should this core be used to configure router/reinjector
             parameters.
         """
         commands = Commands()
 
-        # Set up the sources and sinks for the vertex
-        commands.num(len(source_nets), len(sink_nets))
-        for source_num, source_net in enumerate(source_nets):
-            commands.source_key(source_num, net_keys[source_net])
-        for sink_num, sink_net in enumerate(sink_nets):
-            commands.sink_key(sink_num, net_keys[sink_net])
+        # Set up the sources and sinks for the core
+        commands.num(len(source_flows), len(sink_flows))
+        for source_num, source_flow in enumerate(source_flows):
+            commands.source_key(source_num, flow_keys[source_flow])
+        for sink_num, sink_flow in enumerate(sink_flows):
+            commands.sink_key(sink_num, flow_keys[sink_flow])
 
         # Generate commands for each experimental group
         for group in self._groups:
@@ -811,43 +820,43 @@ class Experiment(object):
                                                             group))
 
             # Set per-source parameters for the group
-            for source_num, source_net in enumerate(source_nets):
+            for source_num, source_flow in enumerate(source_flows):
                 commands.burst(
                     source_num,
-                    self._get_option_value("burst_period", group, source_net),
-                    self._get_option_value("burst_duty", group, source_net),
-                    self._get_option_value("burst_phase", group, source_net))
+                    self._get_option_value("burst_period", group, source_flow),
+                    self._get_option_value("burst_duty", group, source_flow),
+                    self._get_option_value("burst_phase", group, source_flow))
                 commands.probability(
                     source_num,
-                    self._get_option_value("probability", group, source_net))
+                    self._get_option_value("probability", group, source_flow))
                 commands.num_retries(
                     source_num,
-                    self._get_option_value("num_retries", group, source_net))
+                    self._get_option_value("num_retries", group, source_flow))
                 commands.num_packets(
                     source_num,
                     self._get_option_value("packets_per_timestep",
-                                           group, source_net))
+                                           group, source_flow))
                 commands.payload(
                     source_num,
                     self._get_option_value("use_payload",
                                            group,
-                                           source_net))
+                                           source_flow))
 
             # Synchronise before running the group
             commands.barrier()
 
             # Turn on reinjection as required
-            if router_access_vertex:
+            if router_access_core:
                 commands.reinject(
                     self._get_option_value("reinject_packets", group))
 
             # Turn off consumption as required
             commands.consume(
-                self._get_option_value("consume_packets", group, vertex))
+                self._get_option_value("consume_packets", group, core))
 
             # Set the router timeout
             router_timeout = self._get_option_value("router_timeout", group)
-            if router_timeout is not None and router_access_vertex:
+            if router_timeout is not None and router_access_core:
                 if isinstance(router_timeout, integer_types):
                     commands.router_timeout(router_timeout)
                 else:
@@ -868,9 +877,9 @@ class Experiment(object):
             # Restore router timeout, turn consumption back on and reinjection
             # back off after the run
             commands.consume(True)
-            if router_timeout is not None and router_access_vertex:
+            if router_timeout is not None and router_access_core:
                 commands.router_timeout_restore()
-            if router_access_vertex:
+            if router_access_core:
                 commands.reinject(False)
 
             # Drain the network of any remaining packets
@@ -881,111 +890,111 @@ class Experiment(object):
 
         return commands
 
-    def _add_router_recording_vertices(self):
-        """Adds extra vertices to chips with no other vertices to facilitate
+    def _add_router_recording_cores(self):
+        """Adds extra cores to chips with no other cores to facilitate
         recording or setting of router counters and registers, if necessary.
 
         Returns
         -------
-        (vertices, router_access_vertices, placements, allocations, routes)
-            vertices is a list containing all vertices (including any added for
+        (cores, router_access_cores, placements, allocations, routes)
+            cores is a list containing all cores (including any added for
             router-recording purposes).
 
-            router_access_vertices is set of vertices which are responsible
+            router_access_cores is set of cores which are responsible
             for recording router counters or setting router registers on their
             core.
 
             placements, allocations and routes are updated sets of placements
-            accounting for any new router-recording vertices.
+            accounting for any new router-recording cores.
         """
-        # Make a local list of vertices, placements and allocations in the
-        # model. This may be extended with extra vertices for recording router
-        # counter values.
-        vertices = self._vertices[:]
+        # Make a local list of cores, placements and allocations in the model.
+        # This may be extended with extra cores for recording router counter
+        # values.
+        cores = self._cores[:]
         placements = self.placements.copy()
         allocations = self.allocations.copy()
         routes = self.routes.copy()  # Not actually modified at present
 
-        router_access_vertices = set()
+        router_access_cores = set()
 
         # The set of chips (x, y) which have a core allocated to recording
         # router counters.
         recorded_chips = set()
 
         # If router information is being recorded or the router registers are
-        # changed, a vertex must be assigned on every chip to access these
+        # changed, a core must be assigned on every chip to access these
         # registers.
         if self._any_router_registers_used():
             # Assign the job of recording/setting router registers to an
-            # arbitrary vertex on every chip which already has vertices on it.
-            for vertex, placement in iteritems(self.placements):
+            # arbitrary core on every chip which already has cores on it.
+            for core, placement in iteritems(self.placements):
                 if placement not in recorded_chips:
-                    router_access_vertices.add(vertex)
+                    router_access_cores.add(core)
                     recorded_chips.add(placement)
 
-            # If there are chips without any vertices allocated, new
-            # router-access-only vertices must be added.
-            num_extra_vertices = 0
+            # If there are chips without any cores allocated, new
+            # router-access-only cores must be added.
+            num_extra_cores = 0
             if self._reinjection_used():
                 router_recording_core = 2
             else:
                 router_recording_core = 1
             for xy in self.machine:
                 if xy not in recorded_chips:
-                    # Create a new vertex for recording of router data only.
-                    num_extra_vertices += 1
-                    vertex = Vertex(self, "router access {}, {}".format(*xy))
-                    router_access_vertices.add(vertex)
+                    # Create a new core for recording of router data only.
+                    num_extra_cores += 1
+                    core = Core(self, "router access {}, {}".format(*xy))
+                    router_access_cores.add(core)
                     recorded_chips.add(xy)
-                    placements[vertex] = xy
-                    allocations[vertex] = {
+                    placements[core] = xy
+                    allocations[core] = {
                         Cores: slice(router_recording_core,
                                      router_recording_core + 1)}
-                    vertices.append(vertex)
+                    cores.append(core)
 
             logger.info(
-                "{} vertices added to access router registers".format(
-                    num_extra_vertices))
+                "{} cores added to access router registers".format(
+                    num_extra_cores))
 
-        return (vertices, router_access_vertices,
+        return (cores, router_access_cores,
                 placements, allocations, routes)
 
-    def _get_vertex_record_lookup(self, vertices, router_access_vertices,
-                                  placements,
-                                  vertices_source_nets, vertices_sink_nets):
-        """Generates a lookup from vertex to a list of counters that vertex
+    def _get_core_record_lookup(self, cores, router_access_cores,
+                                placements,
+                                cores_source_flows, cores_sink_flows):
+        """Generates a lookup from core to a list of counters that core
         records.
 
         Parameters
         ----------
-        vertices : [:py:class:`.Vertex`, ...]
-        router_access_vertices : set([:py:class:`.Vertex`, ...])
-        placements : {:py:class:`.Vertex`: (x, y), ...}
-        vertices_source_nets : {:py:class:`.Vertex`: [net, ...], ...}
-        vertices_sink_nets : {:py:class:`.Vertex`: [net, ...], ...}
+        cores : [:py:class:`.Core`, ...]
+        router_access_cores : set([:py:class:`.Core`, ...])
+        placements : {:py:class:`.Core`: (x, y), ...}
+        cores_source_flows : {:py:class:`.Core`: [flow, ...], ...}
+        cores_sink_flows : {:py:class:`.Core`: [flow, ...], ...}
 
         Returns
         -------
-        vertices_records : {vertex: [(object, counter), ...], ...}
-            For each vertex, gives an ordered-list of the things recorded by
-            that vertex.
+        cores_records : {core: [(object, counter), ...], ...}
+            For each core, gives an ordered-list of the things recorded by that
+            core.
 
             For router counters, object will be a tuple (x, y) indicating which
             chip that counter is responsible for.
 
-            For non-router counters, object will be the Net associated with the
-            counter.
+            For non-router counters, object will be the Flow associated with
+            the counter.
         """
-        # Get the set of recorded counters for each vertex
-        # {vertex, [counter, ...]}
-        vertices_records = {}
-        for vertex in vertices:
+        # Get the set of recorded counters for each core
+        # {core: [counter, ...]}
+        cores_records = {}
+        for core in cores:
             # Start with the permanently-recorded set of counters
-            records = [(vertex, c) for c in Counters if c.permanent_counter]
+            records = [(core, c) for c in Counters if c.permanent_counter]
 
-            # Add any router-counters if this vertex is recording them
-            if vertex in router_access_vertices:
-                xy = placements[vertex]
+            # Add any router-counters if this core is recording them
+            if core in router_access_cores:
+                xy = placements[core]
                 for counter in Counters:
                     if ((counter.router_counter or
                          counter.reinjector_counter) and
@@ -998,59 +1007,59 @@ class Experiment(object):
                 if (counter.source_counter and
                         self._get_option_value(
                             "record_{}".format(counter.name))):
-                    for net in vertices_source_nets[vertex]:
-                        records.append((net, counter))
+                    for flow in cores_source_flows[core]:
+                        records.append((flow, counter))
 
             # Add any sink counters
             for counter in Counters:
                 if (counter.sink_counter and
                         self._get_option_value(
                             "record_{}".format(counter.name))):
-                    for net in vertices_sink_nets[vertex]:
-                        records.append((net, counter))
+                    for flow in cores_sink_flows[core]:
+                        records.append((flow, counter))
 
-            vertices_records[vertex] = records
+            cores_records[core] = records
 
-        return vertices_records
+        return cores_records
 
-    def _get_option_value(self, option, group=None, vert_or_net=None):
+    def _get_option_value(self, option, group=None, core_or_flow=None):
         """For internal use. Get an option's value for a given
-        group/vertex/net."""
+        group/core/flow."""
 
         values = self._values[option]
         if isinstance(values, dict):
-            if isinstance(vert_or_net, Net):
-                vertex = vert_or_net.source
-                net = vert_or_net
+            if isinstance(core_or_flow, Flow):
+                core = core_or_flow.source
+                flow = core_or_flow
             else:
-                vertex = vert_or_net
+                core = core_or_flow
 
             global_value = values[(None, None)]
             group_value = values.get((group, None), global_value)
-            vertex_value = values.get((None, vertex), group_value)
-            group_vertex_value = values.get((group, vertex), vertex_value)
+            core_value = values.get((None, core), group_value)
+            group_core_value = values.get((group, core), core_value)
 
-            if isinstance(vert_or_net, Net):
-                net_value = values.get((None, net), group_vertex_value)
-                group_net_value = values.get((group, net), net_value)
-                return group_net_value
+            if isinstance(core_or_flow, Flow):
+                flow_value = values.get((None, flow), group_core_value)
+                group_flow_value = values.get((group, flow), flow_value)
+                return group_flow_value
             else:
-                return group_vertex_value
+                return group_core_value
         else:
             return values
 
-    def _set_option_value(self, option, value, group=None, vert_or_net=None):
+    def _set_option_value(self, option, value, group=None, core_or_flow=None):
         """For internal use. Set an option's value for a given
-        group/vertex/net.
+        group/core/flow.
         """
         values = self._values[option]
         if isinstance(values, dict):
-            values[(group, vert_or_net)] = value
+            values[(group, core_or_flow)] = value
         else:
-            if group is not None or vert_or_net is not None:
+            if group is not None or core_or_flow is not None:
                 raise ValueError(
                     "Cannot set {} option on a group-by-group, "
-                    "vertex-by-vertex or net-by-net basis.".format(option))
+                    "core-by-core or flow-by-flow basis.".format(option))
             self._values[option] = value
 
     class _Option(object):
@@ -1120,13 +1129,14 @@ class Experiment(object):
     reinject_packets = _Option("reinject_packets")
 
 
-class Vertex(object):
-    """A vertex in the experiment, created by :py:meth:`Experiment.new_vertex`.
+class Core(object):
+    """A core in the experiment, created by :py:meth:`Experiment.new_core`.
 
-    A vertex represents a single core running a traffic generator/consumer.
+    A core represents a single core running a traffic generator/consumer and
+    logging results.
 
-    See :ref:`vertex parameters <vertex-attributes>` and :ref:`net parameters
-    <net-attributes>` for experimental parameters associated with vertices.
+    See :ref:`core parameters <core-attributes>` and :ref:`flow parameters
+    <flow-attributes>` for experimental parameters associated with cores.
     """
 
     def __init__(self, experiment, name, chip=None):
@@ -1167,17 +1177,18 @@ class Vertex(object):
         return "<{} {}>".format(self.__class__.__name__, repr(self.name))
 
 
-class Net(RigNet):
-    """A connection between vertices, created by :py:meth:`Experiment.new_net`.
+class Flow(RigNet):
+    """A flow of traffic between cores, created by
+    :py:meth:`Experiment.new_flow`.
 
     This object inherits its attributes from :py:class:`rig.netlist.Net`.
 
-    See :ref:`net parameters <net-attributes>` for experimental parameters
-    associated with nets.
+    See :ref:`flow parameters <flow-attributes>` for experimental parameters
+    associated with flows.
     """
 
     def __init__(self, experiment, name, *args, **kwargs):
-        super(Net, self).__init__(*args, **kwargs)
+        super(Flow, self).__init__(*args, **kwargs)
         self._experiment = experiment
         self.name = name
 

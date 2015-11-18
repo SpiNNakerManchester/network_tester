@@ -14,9 +14,9 @@ from network_tester import Experiment, to_csv
 e = Experiment(sys.argv[1])
 
 # Define a random network
-vertices = [e.new_vertex() for _ in range(64)]
-nets = [e.new_net(vertex, random.sample(vertices, 8))
-        for vertex in vertices]
+cores = [e.new_core() for _ in range(64)]
+flows = [e.new_flow(core, random.sample(cores, 8))
+         for core in cores]
 
 e.timestep = 1e-5  # 10 us
 

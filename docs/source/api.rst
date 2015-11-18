@@ -9,7 +9,7 @@ The :py:class:`Experiment` Class
 ````````````````````````````````
 
 .. autoclass:: Experiment()
-    :members: __init__, new_vertex, new_net, new_group, run, place_and_route,
+    :members: __init__, new_core, new_flow, new_group, run, place_and_route,
               placements, allocations, routes, machine
 
 .. _experimental-parameters:
@@ -21,7 +21,7 @@ Global Parameters
 ~~~~~~~~~~~~~~~~~
 
 The following experimental parameters apply globally and cannot be overridden
-on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
+on a core-by-core or flow-by-flow basis. They can be changed between groups.
 
 .. attribute:: Experiment.timestep
 
@@ -38,7 +38,7 @@ on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
         Setting this value too small will result in the traffic generator
         software being unable to meet timing deadlines and thus the experiment
         failing. In practice, 1.5 us is the smallest this can be set but larger
-        values are required if any vertex is the source of many nets or if
+        values are required if any core is the source of many flows or if
         large numbers of metrics are being recorded.
 
 .. attribute:: Experiment.duration
@@ -127,9 +127,9 @@ on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
     booted.
     
     If this field is set to anything other than None at any point during the
-    experiment, a single vertex on every chip will be used to set the router
-    timeout. This may result in new vertices being created internally and
-    placed on otherwise unused chips.
+    experiment, a single core on every chip will be used to set the router
+    timeout. This may result in new cores being created internally and placed
+    on otherwise unused chips.
 
 .. attribute:: Experiment.reinject_packets
     
@@ -144,48 +144,50 @@ on a vertex-by-vertex or net-by-net basis. They can be changed between groups.
     :py:attr:`Experiment.record_reinject_overflow` and
     :py:attr:`Experiment.record_reinject_missed`.
 
-Net/Traffic Generator Parameters
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. _flow-attributes:
 
-The following experimental parameters apply to each net (and thus each traffic
+Flow/Traffic Generator Parameters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The following experimental parameters apply to each flow (and thus each traffic
 generator) in the experiment and control the pattern of packets generated and
-sent down each net.
+sent down each flow.
 
 The global default for each value can be set by setting the corresponding
 :py:class:`Experiment` attribute.
 
-The default for nets sourced by a particular vertex can be set by setting the
-corresponding :py:class:`Vertex` attribute.
+The default for flows sourced by a particular core can be set by setting the
+corresponding :py:class:`Core` attribute.
 
 These values may also be overridden on a group-by-group basis.
 
 For example::
 
     >>> e = Experiment(...)
-    >>> v0 = e.new_vertex()
-    >>> v1 = e.new_vertex()
-    >>> v2 = e.new_vertex()
-    >>> n0 = e.new_net(v0, v1)
-    >>> n1 = e.new_net(v0, v3)
-    >>> n2 = e.new_net(v2, v3)
+    >>> c0 = e.new_core()
+    >>> c1 = e.new_core()
+    >>> c2 = e.new_core()
+    >>> f0 = e.new_flow(c0, c1)
+    >>> f1 = e.new_flow(c0, c3)
+    >>> f2 = e.new_flow(c2, c3)
     
     >>> e.probability = 1.0
-    >>> v0.probability = 0.9
-    >>> n0.probability = 0.8
+    >>> c0.probability = 0.9
+    >>> f0.probability = 0.8
     
-    >>> # First group: n0, n1, n2 all have probability == 0.0
+    >>> # First group: f0, f1, f2 all have probability == 0.0
     >>> with e.new_group():
     ...     e.probability = 0.0
-    ...     v0.probability = 0.0
-    ...     n0.probability = 0.0
+    ...     c0.probability = 0.0
+    ...     f0.probability = 0.0
     
-    >>> # Second group: n2 has probability == 0.1 but n0 and n1 have
+    >>> # Second group: f2 has probability == 0.1 but f0 and f1 have
     >>> # probabilities 0.9 and 0.8 respectively.
     >>> with e.new_group():
     ...     e.probability = 0.1
 
-.. attribute:: Net.probability
-               Vertex.probability
+.. attribute:: Flow.probability
+               Core.probability
                Experiment.probability
 
     The probability, between 0.0 and 1.0, of a packet being generated in a
@@ -194,13 +196,13 @@ For example::
     Default value: 1.0 (Generate a packet every timestep.)
     
     Packet generation is also subject to the burst parameters
-    :py:attr:`~Net.burst_period`, :py:attr:`~Net.burst_duty`, and
-    :py:attr:`~Net.burst_phase`. By default packets are only generated
-    according to :py:attr:`~Net.probability` since bursting behaviour is not
+    :py:attr:`~Flow.burst_period`, :py:attr:`~Flow.burst_duty`, and
+    :py:attr:`~Flow.burst_phase`. By default packets are only generated
+    according to :py:attr:`~Flow.probability` since bursting behaviour is not
     enabled.
 
-.. attribute:: Net.packets_per_timestep
-               Vertex.packets_per_timestep
+.. attribute:: Flow.packets_per_timestep
+               Core.packets_per_timestep
                Experiment.packets_per_timestep
 
     The number of packets to generate each timestep. 
@@ -208,10 +210,10 @@ For example::
     Default value: 1 (Generate a single packet every timestep.)
    
     The probability of each packet being generated is independent and set to
-    :py:attr:`Net.probability`. 
+    :py:attr:`Flow.probability`. 
 
-.. attribute:: Net.num_retries
-               Vertex.num_retries
+.. attribute:: Flow.num_retries
+               Core.num_retries
                Experiment.num_retries
 
     Number of times to re-try sending a packet if back-pressure from the
@@ -219,28 +221,28 @@ For example::
     
     Default value: 0 (Give up immediately when faced with back-pressure)
 
-.. attribute:: Net.burst_period
-               Net.burst_duty
-               Net.burst_phase
-               Vertex.burst_period
-               Vertex.burst_duty
-               Vertex.burst_phase
+.. attribute:: Flow.burst_period
+               Flow.burst_duty
+               Flow.burst_phase
+               Core.burst_period
+               Core.burst_duty
+               Core.burst_phase
                Experiment.burst_period
                Experiment.burst_duty
                Experiment.burst_phase
 
-    Set the bursting behaviour of the traffic generated for a net.
+    Set the bursting behaviour of the traffic generated for a flow.
     
-    Default values: :py:attr:`~Net.burst_period` = 1.0,
-    :py:attr:`~Net.burst_duty` = 0.0 and :py:attr:`~Net.burst_phase` = 0.0.
+    Default values: :py:attr:`~Flow.burst_period` = 1.0,
+    :py:attr:`~Flow.burst_duty` = 0.0 and :py:attr:`~Flow.burst_phase` = 0.0.
     (Not bursting).
     
-    If :py:attr:`~Net.burst_period` is 0.0, packets will be generated each
-    timestep with probability :py:attr:`~Net.probability`.
+    If :py:attr:`~Flow.burst_period` is 0.0, packets will be generated each
+    timestep with probability :py:attr:`~Flow.probability`.
     
-    If :py:attr:`~Net.burst_period` is set to a non-zero number of seconds,
+    If :py:attr:`~Flow.burst_period` is set to a non-zero number of seconds,
     packets may only be generated the proportion of the time specified by
-    :py:attr:`~Net.burst_duty`, every :py:attr:`~Net.burst_period` seconds. 
+    :py:attr:`~Flow.burst_duty`, every :py:attr:`~Flow.burst_period` seconds. 
     
     ::
     
@@ -259,15 +261,15 @@ For example::
         #                     .                              .
         #                     .                              .
     
-    :py:attr:`~Net.burst_phase` gives the initial phase of the bursting
+    :py:attr:`~Flow.burst_phase` gives the initial phase of the bursting
     behaviour. Note that the phase is not reset at the start of each group.
     
-    Special case: If :py:attr:`~Net.burst_phase` is set to None, the phase of
+    Special case: If :py:attr:`~Flow.burst_phase` is set to None, the phase of
     the bursting behaviour will be chosen randomly.
 
 
-.. attribute:: Net.use_payload
-               Vertex.use_payload
+.. attribute:: Flow.use_payload
+               Core.use_payload
                Experiment.use_payload
 
     Should a payload field be added to each generated packet?
@@ -278,36 +280,36 @@ For example::
     'short' packets are generated.
 
 
-.. _vertex-attributes:
+.. _core-attributes:
 
-Vertex Parameters
-~~~~~~~~~~~~~~~~~
+Core Parameters
+~~~~~~~~~~~~~~~
 
-The following experimental parameters apply to each vertex in the experiment.
+The following experimental parameters apply to each core in the experiment.
 
 The global default for each value can be set by setting the corresponding
 :py:class:`Experiment` attribute.
 
 These values may also be overridden on a group-by-group basis.
 
-.. attribute:: Vertex.seed
+.. attribute:: Core.seed
                Experiment.seed
 
-    The seed for the random number generator in the specified vertex or None to
+    The seed for the random number generator in the specified core or None to
     select a random seed automatically.
     
     Default value: None (Seed randomly automatically).
     
     If set to a non-None value, the seed is (re)set at the start of each group.
 
-.. attribute:: Vertex.consume_packets
+.. attribute:: Core.consume_packets
                Experiment.consume_packets
 
-    Should the specified vertex consume packets from the network?
+    Should the specified core consume packets from the network?
     
     Default value: True (Consume packets from the network)
     
-    If set to False, packets sent via any net to the vertex will not be
+    If set to False, packets sent via any flow to the core will not be
     consumed from the network. This will cause the packets to back-up in the
     network and eventually cause routers to drop packets.
     
@@ -322,7 +324,7 @@ Metric Recording Selection
 The following boolean attributes control what metrics are recorded during an
 experiment. Note that the set of recorded metrics may not be changed during an
 experiment (though the recording interval can, see
-:py:attr:`Experiment.record_interval`.
+:py:attr:`Experiment.record_interval`).
 
 By default, no metrics are recorded.
 
@@ -346,9 +348,9 @@ By default, no metrics are recorded.
     
     Record changes in each of the SpiNNaker router counter registers.
     
-    If any of these metrics are recorded, a single vertex on every chip will be
+    If any of these metrics are recorded, a single core on every chip will be
     configured accordingly ensuring router counter values are recorded for all
-    chips in the machine. This may result in new vertices being created
+    chips in the machine. This may result in new cores being created
     internally and placed on core 2 of otherwise unused chips.
 
 
@@ -368,9 +370,9 @@ By default, no metrics are recorded.
         reinjected due to the packet reinjector being unable to collect them
         from the router in time.
     
-    If any of these metrics are recorded, a single vertex on every chip will be
+    If any of these metrics are recorded, a single core on every chip will be
     configured accordingly ensuring router counter values are recorded for all
-    chips in the machine. This may result in new vertices being created
+    chips in the machine. This may result in new cores being created
     internally and placed on core 2 of otherwise unused chips.
     
     Additionally, recording any of these values will cause a further core to be
@@ -383,20 +385,18 @@ By default, no metrics are recorded.
 
 .. attribute:: Experiment.record_sent
     
-    Record the number of packets successfully sent for each net.
+    Record the number of packets successfully sent for each flow.
 
 
 .. attribute:: Experiment.record_blocked
     
-    Record the number of packets which could not be sent for each net due to
+    Record the number of packets which could not be sent for each flow due to
     back-pressure from the network. Note that blocked packets are not resent.
 
 
 .. attribute:: Experiment.record_received
     
-    Record the number of packets received at each sink of each net.
-
-.. _net-attributes:
+    Record the number of packets received at each sink of each flow.
 
 
 
@@ -409,34 +409,34 @@ The :py:class:`Results` Class
 .. autofunction:: to_csv
 
 
-The :py:class:`Vertex`, :py:class:`Net` and :py:class:`Group` Classes
-`````````````````````````````````````````````````````````````````````
+The :py:class:`Core`, :py:class:`Flow` and :py:class:`Group` Classes
+````````````````````````````````````````````````````````````````````
 
-.. autoclass:: Vertex()
+.. autoclass:: Core()
     :members:
     
     .. attribute:: name
         
-        The human-readable name of this vertex.
+        The human-readable name of this core.
 
-.. autoclass:: Net()
+.. autoclass:: Flow()
     :members:
     
     .. attribute:: name
         
-        The human-readable name of this net.
+        The human-readable name of this flow.
     
     .. attribute:: source
         
-        The source vertex of the net.
+        The source core of the flow.
     
     .. attribute:: sinks
         
-        A list of sink vertices for the net.
+        A list of sink cores for the flow.
     
     .. attribute:: weight
         
-        The weight placement & routing hint for the net.
+        The weight placement & routing hint for the flow.
 
 .. autoclass:: Group()
     :members:
