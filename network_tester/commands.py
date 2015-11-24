@@ -337,7 +337,8 @@ class Commands(object):
             The proportion of the duty cycle to generate packets.
         phase : float or None
             The proportion of the way through the duty cycle the burst
-            generator should start at. If None, this is set randomly.
+            generator should start at. If None, this is set randomly. If
+            outside the range 0.0 - 1.0 it will be wrapped into that range.
         """
         assert not self._exited
 
@@ -366,6 +367,10 @@ class Commands(object):
             duty = int(round((period * duty) / self._current_timestep))
             self._commands.extend([NT_CMD.BURST_DUTY | (source_num << 8),
                                    duty])
+
+        # Wrap the phase into the ange 0.0 - 1.0 if required.
+        if phase is not None:
+            phase %= 1.0
 
         if self._current_burst_phase[source_num] != phase:
             # Generate a random phase if requested (setting the current value

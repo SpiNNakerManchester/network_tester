@@ -247,22 +247,24 @@ For example::
     ::
     
         #
-        #                            burst_period seconds
-        #                     |------------------------------|
+        #                                burst_period seconds
+        #                          |------------------------------|
         #              (burst_duty * burst_period) seconds
-        #                          |-------|
+        #                     |-------|
         #       (burst_phase * burst_period) seconds
         #                     |----|
-        #                     .                              .
-        # maybe send          .    +-------+                 .
-        #                     .    |       |                 .
-        #                     .    |       |                 .
-        # never send    ...---.----+       +-----------------.---...
-        #                     .                              .
-        #                     .                              .
+        #                          .                              .
+        # maybe send          +----.--+                      +----.--+
+        #                     |    .  |                      |    .  |
+        #                     |    .  |                      |    .  |
+        # never send    ...---+    .  +----------------------+    .  +---...
+        #                          .                              .
+        #                          .                              .
+        #                      time = t                 time = t + burst_period
     
     :py:attr:`~Flow.burst_phase` gives the initial phase of the bursting
     behaviour. Note that the phase is not reset at the start of each group.
+    Values outside of the range 0.0 - 1.0 will be wrapped to within this range.
     
     Special case: If :py:attr:`~Flow.burst_phase` is set to None, the phase of
     the bursting behaviour will be chosen randomly.

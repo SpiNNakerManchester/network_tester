@@ -290,22 +290,26 @@ def test_burst():
     a.burst(0, 0.0, 123.0, None)
     assert len(a._commands) == 4
 
-    # Should change everything when set
-    a.burst(0, 1e-6, 0.1, 0.1)
+    # Should change everything when set (including wrapping the period)
+    a.burst(0, 1e-6, 0.1, 1.25)
     assert len(a._commands) == 10
     assert a._commands[-6:] == [NT_CMD.BURST_PERIOD, 1000,
                                 NT_CMD.BURST_DUTY, 100,
-                                NT_CMD.BURST_PHASE, 100]
+                                NT_CMD.BURST_PHASE, 250]
 
     # Should change everything when the period changes
-    a.burst(0, 2e-6, 0.1, 0.1)
+    a.burst(0, 2e-6, 0.1, 1.25)
     assert len(a._commands) == 16
     assert a._commands[-6:] == [NT_CMD.BURST_PERIOD, 2000,
                                 NT_CMD.BURST_DUTY, 200,
-                                NT_CMD.BURST_PHASE, 200]
+                                NT_CMD.BURST_PHASE, 500]
 
     # Should change nothing if nothing changes
-    a.burst(0, 2e-6, 0.1, 0.1)
+    a.burst(0, 2e-6, 0.1, 1.25)
+    assert len(a._commands) == 16
+
+    # Should change nothing if phase changes to something different but equal
+    a.burst(0, 2e-6, 0.1, -0.75)
     assert len(a._commands) == 16
 
     # Should just change other parts when only they change
