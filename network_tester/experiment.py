@@ -105,11 +105,24 @@ class Experiment(object):
         # A list of experimental groups which have been defined
         self._groups = []
 
-        # A list of cores in the experiment
+        # A list of cores in the experiment, in order of creation (this order
+        # is preserved in result listings).
         self._cores = []
 
-        # A list of flows in the experiment
+        # A list of flows in the experiment, in order of creation (this order
+        # is preserved in result listings)
         self._flows = []
+
+        # A set of cores added (when required) immediately before placement for
+        # the purposes of packet reinjection, one per core. These cores are
+        # represented by a _ReinjectionCore.
+        self._reinjection_cores = None
+
+        # A set of cores used for the purposes of recording router values. Some
+        # of these may not be present in self._cores and are created just after
+        # placement in to ensure each chip has at least one core to record
+        # router values.  These cores are represented by a Core object.
+        self._router_recording_cores = None
 
         # Holds the value of every option along with any special cases.
         # If a value can have per-node or per-group exceptions it is stored as
@@ -182,7 +195,7 @@ class Experiment(object):
 
             If both ``chip_x`` and ``chip_y`` are None (the default), the core
             will be automatically placed on some available chip (see
-            :py:meth:`network_tester.Experiment.place_and_route`).
+            :py:meth:`network_tester.Experiment.run`).
 
             Note that either both must be an integer or both must be None.
         name
@@ -207,9 +220,6 @@ class Experiment(object):
                  name if name is not None else len(self._cores),
                  chip)
         self._cores.append(c)
-
-        # Adding a new core invalidates any existing placement solution
-        self.placements = None
 
         return c
 
@@ -266,9 +276,6 @@ class Experiment(object):
             name = len(self._flows)
         f = Flow(self, name, source, sinks, weight)
 
-        # Adding a new flow invalidates any routing solution.
-        self.routes = None
-
         self._flows.append(f)
         return f
 
@@ -313,18 +320,29 @@ class Experiment(object):
         self._groups.append(g)
         return g
 
-    def run(self, app_id=0x42, create_group_if_none_exist=True,
-            ignore_deadline_errors=False, before_load=None, before_group=None,
-            before_read_results=None):
+    def run(self, app_id=0xDB, create_group_if_none_exist=True,
+            ignore_deadline_errors=False,
+            constraints=None,
+            place=place, place_kwargs={},
+            allocate=allocate, allocate_kwargs={},
+            route=route, route_kwargs={},
+            before_load=None, before_group=None, before_read_results=None):
         """Run the experiment on SpiNNaker and return the results.
 
-        If placements, allocations or routes have not been provided, the cores
-        and flows will be automatically placed and routed using the default
-        algorithms in Rig.
+        Before the experiment is started, any cores whose location was not
+        specified are placed automatically on suitable chips and routes are
+        generated between them. If fine-grained control is required the
+        ``place``, ``allocate`` and ``route`` arguments allow user-defined
+        :py:func:`placement <rig.place_and_route.place>`, :py:func:`allocation
+        <rig.place_and_route.allocate>` and :py:func:`routing
+        <rig.place_and_route.route>` algorithms to be used. The result of these
+        processes can be found in the :py:attr:`placements`,
+        :py:attr:`allocations` and  :py:attr:`routes` respectively at any time
+        after the ``before_load`` callback has been called.
 
         Following placement, the experimental parameters are loaded onto the
         machine and each experimental group is executed in turn. Results are
-        recorded by the machine and at the end of the experiment are read back.
+        recorded by the machine and are read back at the end of the experiment.
 
         .. warning::
             Though a global synchronisation barrier is used between the
@@ -354,11 +372,40 @@ class Experiment(object):
             This option is useful when running experiments which involve
             over-saturating packet sinks or the network in some experimental
             groups.
+        constraints : [constraint, ...]
+            A list of additional place-and-route constraints to apply.
+            In additon to the constraints supplied via this argument, a
+            :py:class:`rig.place_and_route.constraints.ReserveResourceConstraint`
+            will be added to reserve the monitor processor on every chip and a
+            :py:class:`rig.place_and_route.constraints.LocationConstraint` is
+            also added for all cores whose chip was explicitly specified (and
+            for other special purpose cores such as packet reinjection cores
+            and router-register recording cores).
+        place : placer
+            A :py:func:`Rig-API complaint <rig.place_and_route.place>`
+            placement algorithm. This will be used to automatically place any
+            cores whose location was not specified.
+        place_kwargs : dict
+            Additional algorithm-specific keyword arguments to supply to the
+            placer.
+        allocate : allocator
+            A :py:func:`Rig-API complaint <rig.place_and_route.allocate>`
+            allocation algorithm.
+        allocate_kwargs : dict
+            Additional algorithm-specific keyword arguments to supply to the
+            allocator.
+        route : router
+            A :py:func:`Rig-API complaint <rig.place_and_route.route>` route
+            algorithm. Used to route all flows in the experiment.
+        route_kwargs : dict
+            Additional algorithm-specific keyword arguments to supply to the
+            router.
         before_load : function or None
             If not None, this function is called before the network tester
-            application is loaded onto the machine. It is called with the
-            :py:class:`Experiment` object as its argument. The function may
-            block to postpone the loading process as required.
+            application is loaded onto the machine and after place-and-route
+            has been completed. It is called with the :py:class:`Experiment`
+            object as its argument. The function may block to postpone the
+            loading process as required.
         before_group : function or None
             If not None, this function is called before each experimental group
             is run on the machine. It is called with the :py:class:`Experiment`
@@ -395,20 +442,23 @@ class Experiment(object):
         if create_group_if_none_exist and len(self._groups) == 0:
             self.new_group()
 
-        # Place and route the cores (if required)
-        self.place_and_route()
+        # Place and route the cores, adding router recording cores and packet
+        # reinjection cores.
+        self._place_and_route(
+            constraints,
+            place, place_kwargs,
+            allocate, allocate_kwargs,
+            route, route_kwargs
+        )
 
-        # Add nodes to unused chips to access router registers/counters (if
-        # necessary).
-        (cores, router_access_cores,
-         placements, allocations, routes) = \
-            self._add_router_recording_cores()
+        # Get a set of all cores running the network tester binary
+        nt_cores = set(self._cores).union(self._router_recording_cores)
 
         # Assign a unique routing key to each flow
         flow_keys = {flow: num << 8
                      for num, flow in enumerate(self._flows)}
         routing_tables = build_routing_tables(
-            routes,
+            self._routes,
             {flow: (key, 0xFFFFFF00) for flow, key in iteritems(flow_keys)})
 
         network_tester_binary = pkg_resources.resource_filename(
@@ -416,28 +466,31 @@ class Experiment(object):
         reinjector_binary = pkg_resources.resource_filename(
             "network_tester", "binaries/reinjector.aplx")
 
-        # Specify the appropriate binary for the network tester cores.
-        application_map = build_application_map(
-            {core: network_tester_binary for core in cores},
-            placements, allocations)
+        # Specify the appropriate binary for all cores.
+        nt_application_map = build_application_map(
+            {core: network_tester_binary for core in nt_cores},
+            self._placements, self._allocations)
+        reinjector_application_map = build_application_map(
+            {core: reinjector_binary for core in self._reinjection_cores},
+            self._placements, self._allocations)
 
         # Get the set of source and sink flows for each core. Also sets an
         # explicit ordering of the sources/sinks within each.
         # {core: [source_or_sink, ...], ...}
-        cores_source_flows = {c: [] for c in cores}
-        cores_sink_flows = {c: [] for c in cores}
+        cores_source_flows = {c: [] for c in nt_cores}
+        cores_sink_flows = {c: [] for c in nt_cores}
         for flow in self._flows:
             cores_source_flows[flow.source].append(flow)
             for sink in flow.sinks:
                 cores_sink_flows[sink].append(flow)
+
         # Sort all sink lists by key to allow binary-searching in the
         # network_tester application
         for sink_flows in itervalues(cores_sink_flows):
             sink_flows.sort(key=(lambda f: flow_keys[f]))
 
         cores_records = self._get_core_record_lookup(
-            cores, router_access_cores, placements,
-            cores_source_flows, cores_sink_flows)
+            nt_cores, cores_source_flows, cores_sink_flows)
 
         # Fill out the set of commands for each core
         logger.info("Generating SpiNNaker configuration data...")
@@ -448,8 +501,8 @@ class Experiment(object):
                 sink_flows=cores_sink_flows[core],
                 flow_keys=flow_keys,
                 records=[cntr for obj, cntr in cores_records[core]],
-                router_access_core=core in router_access_cores)
-            for core in cores
+                router_access_core=core in self._router_recording_cores)
+            for core in nt_cores
         }
 
         # The data size for the results from each core
@@ -461,13 +514,13 @@ class Experiment(object):
                 # One word per recorded value per sample.
                 (total_num_samples * len(cores_records[core]))
             ) * 4
-            for core in cores}
+            for core in nt_cores}
 
-        # The raw result data for each core.
-        cores_result_data = {}
-
+        # Call the user-defined pre-load callback...
         if before_load is not None:
             before_load(self)
+
+        cores_result_data = {}
 
         # Actually load and run the experiment on the machine.
         with self._mc.application(app_id):
@@ -475,15 +528,15 @@ class Experiment(object):
             # recored results.
             cores_sdram = {}
             logger.info("Allocating SDRAM...")
-            for core in cores:
+            for core in nt_cores:
                 size = max(
                     # Size of commands (with length prefix)
                     cores_commands[core].size,
                     # Size of results (plus the flags)
                     cores_result_size[core],
                 )
-                x, y = placements[core]
-                p = allocations[core][Cores].start
+                x, y = self._placements[core]
+                p = self._allocations[core][Cores].start
                 cores_sdram[core] = self._mc.sdram_alloc_as_filelike(
                     size, x=x, y=y, tag=p)
 
@@ -500,16 +553,14 @@ class Experiment(object):
             # Load the packet-reinjection application if used. This must be
             # completed before the main application since it creates a tagged
             # memory allocation.
-            if self._reinjection_used():
+            if reinjector_application_map:
                 logger.info("Loading packet-reinjection application...")
-                self._mc.load_application(reinjector_binary,
-                                          {xy: set([1])
-                                           for xy in self.machine})
+                self._mc.load_application(reinjector_application_map)
 
             # Load the application
-            logger.info("Loading application on to {} cores...".format(
-                len(cores)))
-            self._mc.load_application(application_map)
+            logger.info("Loading network tester application "
+                        "on to {} cores...".format(len(nt_cores)))
+            self._mc.load_application(nt_application_map)
 
             # Run through each experimental group
             next_barrier = "sync0"
@@ -517,14 +568,16 @@ class Experiment(object):
                 # Reach the barrier before the run starts
                 logger.info("Waiting for barrier...")
                 num_at_barrier = self._mc.wait_for_cores_to_reach_state(
-                    next_barrier, len(cores), timeout=10.0)
-                assert num_at_barrier == len(cores), \
+                    next_barrier, len(nt_cores), timeout=10.0)
+                assert num_at_barrier == len(nt_cores), \
                     "Not all cores reached the barrier " \
                     "before {}.".format(group)
 
+                # Run the user-defined pre-group callback
                 if before_group is not None:
                     before_group(self, group)
 
+                # Start the group running
                 self._mc.send_signal(next_barrier)
                 next_barrier = "sync1" if next_barrier == "sync0" else "sync0"
 
@@ -544,10 +597,11 @@ class Experiment(object):
             # Wait for all cores to exit after their final run
             logger.info("Waiting for barrier...")
             num_at_barrier = self._mc.wait_for_cores_to_reach_state(
-                "exit", len(cores), timeout=10.0)
-            assert num_at_barrier == len(cores), \
+                "exit", len(nt_cores), timeout=10.0)
+            assert num_at_barrier == len(nt_cores), \
                 "Not all cores reached the final barrier."
 
+            # Run the user-defined pre-result collection callback
             if before_read_results is not None:
                 before_read_results(self)
 
@@ -561,7 +615,8 @@ class Experiment(object):
 
         # Process read results
         results = Results(self, self._cores, self._flows, cores_records,
-                          router_access_cores, placements, routes,
+                          self._router_recording_cores,
+                          self._placements, self._routes,
                           cores_result_data, self._groups)
         if any(not e.is_deadline if ignore_deadline_errors else True
                for e in results.errors):
@@ -572,13 +627,12 @@ class Experiment(object):
             logger.info("Experiment completed successfully")
             return results
 
-    def place_and_route(self,
-                        constraints=None,
-                        place=place, place_kwargs={},
-                        allocate=allocate, allocate_kwargs={},
-                        route=route, route_kwargs={}):
-        """Place and route the cores and flows in the current experiment, if
-        required.
+    def _place_and_route(self,
+                         constraints=None,
+                         place=place, place_kwargs={},
+                         allocate=allocate, allocate_kwargs={},
+                         route=route, route_kwargs={}):
+        """Place and route the cores and flows in the current experiment.
 
         If extra control is required over placement and routing of cores and
         flows in an experiment, this method allows additional constraints and
@@ -589,22 +643,20 @@ class Experiment(object):
         :py:attr:`placements`, :py:attr:`allocations` and  :py:attr:`routes`
         respectively.
 
-        If even greater control is required, :py:attr:`placements`,
-        :py:attr:`allocations` and  :py:attr:`routes` may be set explicitly.
-        Once these attributes have been set, this method will not alter them.
-
-        Since many applications will not care strongly about placement,
-        allocation and routing, this method is called implicitly by
-        :py:meth:`.run`.
+        This method is called by :py:meth:`.run` if place-and-route has not
+        already been called manually. Note that a place-and-route solution is
+        invalidated by creating cores and flows and by modifying experimental
+        parameters. This function, thus, should be used immediately before
+        calling :py:meth:`.run`.
 
         Parameters
         ----------
         constraints : [constraint, ...]
             A list of additional constraints to apply. A
             :py:class:`rig.place_and_route.constraints.ReserveResourceConstraint`
-            will be applied to reserve the monitor processor on top of this
-            constraint along with location constraints for all cores whose
-            chip has been specified.
+            will be added to reserve the monitor processor. A
+            :py:class:`rig.place_and_route.constraints.LocationConstraint` is
+            also added for all cores whose chip was explicitly specified.
         place : placer
             A Rig-API complaint placement algorithm.
         place_kwargs : dict
@@ -637,117 +689,115 @@ class Experiment(object):
             if core.chip is not None
         )
 
-        # Reserve a core for packet reinjection on each chip (if required)
+        # Add reinjection cores, one per chip, if required
+        self._reinjection_cores = set()
         if self._reinjection_used():
-            constraints += [ReserveResourceConstraint(Cores, slice(1, 2))]
+            for chip in self.machine:
+                core = _ReinjectionCore()
+                vertices_resources[core] = {Cores: 1}
+                self._reinjection_cores.add(core)
+                constraints += [LocationConstraint(core, chip)]
 
-        if self.placements is None:
-            logger.info("Placing cores...")
-            self.placements = place(vertices_resources=vertices_resources,
-                                    nets=self._flows,
-                                    machine=self.machine,
-                                    constraints=constraints,
-                                    **place_kwargs)
-            self.allocations = None
-            self.routes = None
+        # Perform placement as required
+        logger.info("Placing cores...")
+        self._placements = place(vertices_resources=vertices_resources,
+                                 nets=self._flows,
+                                 machine=self.machine,
+                                 constraints=constraints,
+                                 **place_kwargs)
 
-        if self.allocations is None:
-            logger.info("Allocating cores...")
-            self.allocations = allocate(vertices_resources=vertices_resources,
-                                        nets=self._flows,
-                                        machine=self.machine,
-                                        constraints=constraints,
-                                        placements=self.placements,
-                                        **allocate_kwargs)
-            self.routes = None
+        # Add router-recording cores to any chips which don't have any cores on
+        # them.
+        self._router_recording_cores = set()
+        if self._any_router_registers_used():
+            # A list of chips with a core on it for recording purposes.
+            recorded_chips = set()
 
-        if self.routes is None:
-            logger.info("Routing flows...")
-            self.routes = route(vertices_resources=vertices_resources,
-                                nets=self._flows,
-                                machine=self.machine,
-                                constraints=constraints,
-                                placements=self.placements,
-                                allocations=self.allocations,
-                                **allocate_kwargs)
+            # Assign the job of recording/setting router registers to an
+            # arbitrary core on every chip which already has cores on it.
+            for core, placement in iteritems(self._placements):
+                if placement not in recorded_chips and isinstance(core, Core):
+                    self._router_recording_cores.add(core)
+                    recorded_chips.add(placement)
+
+            # Create a new core to record router values on every chip without a
+            # core already available for recording.
+            num_extra_cores = 0
+            for chip in self.machine:
+                if chip not in recorded_chips:
+                    core = Core(self,
+                                "router recording core ({}, {})".format(*chip),
+                                chip)
+                    vertices_resources[core] = {Cores: 1}
+                    self._router_recording_cores.add(core)
+                    self._placements[core] = core.chip
+                    num_extra_cores += 1
+            logger.info(
+                "{} cores added to record router registers".format(
+                    num_extra_cores))
+
+        # Perform allocation
+        logger.info("Allocating cores...")
+        self._allocations = allocate(vertices_resources=vertices_resources,
+                                     nets=self._flows,
+                                     machine=self.machine,
+                                     constraints=constraints,
+                                     placements=self._placements,
+                                     **allocate_kwargs)
+
+        # Perform routing
+        logger.info("Routing flows...")
+        self._routes = route(vertices_resources=vertices_resources,
+                             nets=self._flows,
+                             machine=self.machine,
+                             constraints=constraints,
+                             placements=self._placements,
+                             allocations=self._allocations,
+                             **allocate_kwargs)
 
     @property
     def placements(self):
         """A dictionary {:py:class:`Core`: (x, y), ...}, or None.
 
-        Defines the chip on which each core will be placed during the
-        experiment. Note that the placement must define the position of *every*
-        core. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
-        will cause all cores to be placed automatically.
-
-        Setting this attribute will also set :py:attr:`.allocations` and
-        :py:attr:`.routes` to None.
-
-        Any placement must be valid for the :py:class:`~rig.machine.Machine`
-        specified by the :py:attr:`.machine` attribute. Core 0 must always be
-        reserved for the monitor processor and, if packet reinjection is used
-        or recorded (see :py:attr:`Experiment.reinject_packets`), core 1 must
-        also be reserved for the packet reinjection application.
+        The placements selected for each core, set after calling
+        :py:meth:`.run`.
 
         See also :py:func:`rig.place_and_route.place`.
         """
-        return self._placements
-
-    @placements.setter
-    def placements(self, value):
-        self._placements = value
-        self.allocation = None
-        self.routes = None
+        # Filter out cores which were not created by the user.
+        return {core: chip for core, chip in iteritems(self._placements)
+                if core in self._cores}
 
     @property
     def allocations(self):
         """A dictionary {:py:class:`Core`: {resource: slice}, ...} or None.
 
-        Defines the resources allocated to each core. This must include
-        exactly 1 unit of the :py:class:`~rig.machine.Cores` resource.  Note
-        that the allocation must define the resource allocation of *every*
-        core. If None, calling :py:meth:`.run` or :py:meth:`.place_and_route`
-        will cause all cores to have their resources allocated
-        automatically.
-
-        Setting this attribute will also set :py:attr:`.routes` to None.
-
-        Any allocation must be valid for the :py:class:`~rig.machine.Machine`
-        specified by the :py:attr:`.machine` attribute. Core 0 must always be
-        reserved for the monitor processor and, if packet reinjection is used
-        or recorded (see :py:attr:`Experiment.reinject_packets`), core 1 must
-        also be reserved for the packet reinjection application.
+        Defines the resources allocated to each core. This will include an
+        allocation of the :py:class:`~rig.machine.Cores` resource representing
+        the core allocated.
 
         See also :py:func:`rig.place_and_route.allocate`.
         """
-        return self._allocations
-
-    @allocations.setter
-    def allocations(self, value):
-        self._allocations = value
-        self.routes = None
+        # Filter out cores which were not created by the user.
+        return {core: allocation
+                for core, allocation in iteritems(self._allocations)
+                if core in self._cores}
 
     @property
     def routes(self):
         """A dictionary {:py:class:`Flow`: \
         :py:class:`rig.place_and_route.routing_tree.RoutingTree`, ...} or None.
 
-        Defines the route used for each flow.  Note that the route must be
-        defined for *every* flow. If None, calling :py:meth:`.run` or
-        :py:meth:`.place_and_route` will cause all flows to be routed
-        automatically.
+        Defines the route used for each flow.
 
         See also :py:func:`rig.place_and_route.route`.
         """
         return self._routes
 
-    @routes.setter
-    def routes(self, value):
-        self._routes = value
-
     def _any_router_registers_used(self):
         """Are any router registers (including reinjection counters) being
-        recorded or configured during the experiment?"""
+        recorded or configured during the experiment?
+        """
         return (any(self._get_option_value("record_{}".format(counter.name))
                     for counter in Counters if counter.router_counter) or
                 self._get_option_value("router_timeout") is not None or
@@ -772,6 +822,10 @@ class Experiment(object):
 
         This property caches the machine description read from the machine to
         avoid repeatedly polling the SpiNNaker system.
+
+        Users may modify this machine to influence the automatic
+        place-and-route tools (e.g. by clearing the set of dead links to force
+        apparently dead links to be used).
         """
         if self._machine is None:
             logger.info("Getting SpiNNaker machine information...")
@@ -890,77 +944,7 @@ class Experiment(object):
 
         return commands
 
-    def _add_router_recording_cores(self):
-        """Adds extra cores to chips with no other cores to facilitate
-        recording or setting of router counters and registers, if necessary.
-
-        Returns
-        -------
-        (cores, router_access_cores, placements, allocations, routes)
-            cores is a list containing all cores (including any added for
-            router-recording purposes).
-
-            router_access_cores is set of cores which are responsible
-            for recording router counters or setting router registers on their
-            core.
-
-            placements, allocations and routes are updated sets of placements
-            accounting for any new router-recording cores.
-        """
-        # Make a local list of cores, placements and allocations in the model.
-        # This may be extended with extra cores for recording router counter
-        # values.
-        cores = self._cores[:]
-        placements = self.placements.copy()
-        allocations = self.allocations.copy()
-        routes = self.routes.copy()  # Not actually modified at present
-
-        router_access_cores = set()
-
-        # The set of chips (x, y) which have a core allocated to recording
-        # router counters.
-        recorded_chips = set()
-
-        # If router information is being recorded or the router registers are
-        # changed, a core must be assigned on every chip to access these
-        # registers.
-        if self._any_router_registers_used():
-            # Assign the job of recording/setting router registers to an
-            # arbitrary core on every chip which already has cores on it.
-            for core, placement in iteritems(self.placements):
-                if placement not in recorded_chips:
-                    router_access_cores.add(core)
-                    recorded_chips.add(placement)
-
-            # If there are chips without any cores allocated, new
-            # router-access-only cores must be added.
-            num_extra_cores = 0
-            if self._reinjection_used():
-                router_recording_core = 2
-            else:
-                router_recording_core = 1
-            for xy in self.machine:
-                if xy not in recorded_chips:
-                    # Create a new core for recording of router data only.
-                    num_extra_cores += 1
-                    core = Core(self, "router access {}, {}".format(*xy))
-                    router_access_cores.add(core)
-                    recorded_chips.add(xy)
-                    placements[core] = xy
-                    allocations[core] = {
-                        Cores: slice(router_recording_core,
-                                     router_recording_core + 1)}
-                    cores.append(core)
-
-            logger.info(
-                "{} cores added to access router registers".format(
-                    num_extra_cores))
-
-        return (cores, router_access_cores,
-                placements, allocations, routes)
-
-    def _get_core_record_lookup(self, cores, router_access_cores,
-                                placements,
+    def _get_core_record_lookup(self, cores,
                                 cores_source_flows, cores_sink_flows):
         """Generates a lookup from core to a list of counters that core
         records.
@@ -968,8 +952,6 @@ class Experiment(object):
         Parameters
         ----------
         cores : [:py:class:`.Core`, ...]
-        router_access_cores : set([:py:class:`.Core`, ...])
-        placements : {:py:class:`.Core`: (x, y), ...}
         cores_source_flows : {:py:class:`.Core`: [flow, ...], ...}
         cores_sink_flows : {:py:class:`.Core`: [flow, ...], ...}
 
@@ -993,8 +975,8 @@ class Experiment(object):
             records = [(core, c) for c in Counters if c.permanent_counter]
 
             # Add any router-counters if this core is recording them
-            if core in router_access_cores:
-                xy = placements[core]
+            if core in self._router_recording_cores:
+                xy = self._placements[core]
                 for counter in Counters:
                     if ((counter.router_counter or
                          counter.reinjector_counter) and
@@ -1175,6 +1157,10 @@ class Core(object):
 
     def __repr__(self):
         return "<{} {}>".format(self.__class__.__name__, repr(self.name))
+
+
+class _ReinjectionCore(object):
+    """An object used to represent a packet reinjector core."""
 
 
 class Flow(RigNet):

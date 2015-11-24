@@ -9,7 +9,7 @@ The :py:class:`Experiment` Class
 ````````````````````````````````
 
 .. autoclass:: Experiment()
-    :members: __init__, new_core, new_flow, new_group, run, place_and_route,
+    :members: __init__, new_core, new_flow, new_group, run,
               placements, allocations, routes, machine
 
 .. _experimental-parameters:

@@ -19,10 +19,6 @@ cores = [e.new_core() for _ in range(num_cores)]
 flows = [e.new_flow(c, random.sample(cores, fan_out))
          for c in cores]
 
-# Uncomment to place the network using the (dumb) Hilbert placer.
-# from rig.place_and_route.place.hilbert import place as hilbert_place
-# e.place_and_route(place=hilbert_place)
-
 ###############################################################################
 # Traffic description
 ###############################################################################
@@ -85,6 +81,11 @@ e.record_dropped_multicast = True
 
 # Run the experiment
 results = e.run(ignore_deadline_errors=True)
+
+# Alternatively, comment the above and uncoment the below to place the network
+# using the (dumb) Hilbert placer.
+# from rig.place_and_route.place.hilbert import place as hilbert_place
+# results = e.run(ignore_deadline_errors=True, place=hilbert_place)
 
 
 ###############################################################################

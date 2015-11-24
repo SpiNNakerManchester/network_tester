@@ -21,18 +21,13 @@ packets_per_timestep = 3
 
 # We'll have a group of cores on one chip sending packets and a corresponding
 # set of cores on another chip.
-send_cores = [e.new_core(name="s{}".format(n)) for n in range(16)]
-recv_cores = [e.new_core(name="r{}".format(n)) for n in range(16)]
+send_cores = [e.new_core(0, 0, name="s{}".format(n)) for n in range(16)]
+recv_cores = [e.new_core(1, 0, name="r{}".format(n)) for n in range(16)]
 for s, r in zip(send_cores, recv_cores):
     # We create multiple flows to allow multiple packets to be sent per
     # timestep since a single flow will send up-to one packet per timestep.
     for _ in range(packets_per_timestep):
         e.new_flow(s, r)
-
-# We will explicitly place the cores on different chips
-placements = {c: (0, 0) for c in send_cores}
-placements.update({c: (1, 0) for c in recv_cores})
-e.placements = placements
 
 # We allow some warmup time to allow the network to reach a stable state before
 # recording

@@ -66,8 +66,8 @@ SpiNNaker IP address or hostname as its argument::
     >>> e = Experiment("192.168.240.253")
 
 The first task when defining an experiment is to define a set of cores and
-flows between them. In this example we'll create a network with 64 randomly
-connected cores. First the cores are created using
+flows of network traffic between them. In this example we'll create a network
+with 64 cores with random flows between them. First the cores are created using
 :py:meth:`~Experiment.new_core`::
 
     >>> cores = [e.new_core() for _ in range(64)]
@@ -83,9 +83,9 @@ cores::
 By default, the cores and flows we've defined will be automatically placed and
 routed in the SpiNNaker machine before we run the experiment.  To manually
 specify which chip each core is added to, this can be given as arguments to
-:py:meth:`~Experiment.new_core`, for example ``e.new_core(1, 2)`` would
-create a core on chip (1, 2). For greater control over the place and route
-process, see :py:meth:`~Experiment.place_and_route`.
+:py:meth:`~Experiment.new_core`, for example ``e.new_core(1, 2)`` would create
+a core on chip (1, 2). For greater control over the place and route process,
+see :py:meth:`~Experiment.run`.
 
 
 Controling packet generation

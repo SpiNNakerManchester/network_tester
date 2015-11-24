@@ -4,13 +4,18 @@ import struct
 
 from mock import Mock
 
-from six import iteritems
+from six import itervalues
 
 from rig.netlist import Net as RigNet
 
 from rig.machine import Machine, Cores
 
-from network_tester.experiment import Experiment, Core, Flow, Group
+from rig.place_and_route import place, allocate, route
+from rig.place_and_route.constraints import \
+    ReserveResourceConstraint, LocationConstraint
+
+from network_tester.experiment import \
+    Experiment, Core, Flow, Group, _ReinjectionCore
 
 from network_tester.commands import NT_CMD
 
@@ -496,94 +501,100 @@ def test_reinjection_used(reinjection_register):
 @pytest.mark.parametrize("record_reinjected", [True, False])
 def test_place_and_route(record_reinjected):
     mock_mc = Mock()
-    mock_place = Mock()
-    mock_allocate = Mock()
-    mock_route = Mock()
+    mock_mc.get_machine.return_value = Machine(2, 2)
+    mock_place = Mock(side_effect=place)
+    mock_allocate = Mock(side_effect=allocate)
+    mock_route = Mock(side_effect=route)
 
     e = Experiment(mock_mc)
+    c0 = e.new_core(0, 0)
+    c1 = e.new_core()
+    f0 = e.new_flow(c0, c1)
     e.record_reinjected = record_reinjected
 
-    # Initially should call all functions
-    e.place_and_route(place=mock_place,
-                      allocate=mock_allocate,
-                      route=mock_route)
+    e._place_and_route(place=mock_place,
+                       allocate=mock_allocate,
+                       route=mock_route)
     assert mock_place.called
     assert mock_allocate.called
     assert mock_route.called
 
     # Check constraints
-    constraints = mock_place.mock_calls[0][2]["constraints"]
+    constraints = list(mock_place.mock_calls[0][2]["constraints"])
+
+    # Should reserve core 0 as the monitor
+    reserved_monitor = False
+    for i, constraint in enumerate(constraints):  # pragma: no branch
+        if (  # pragma: no branch
+                isinstance(constraint, ReserveResourceConstraint)
+                and constraint.resource is Cores
+                and constraint.reservation == slice(0, 1)
+                and constraint.location is None):
+            reserved_monitor = True
+            del constraints[i]
+            break
+    assert reserved_monitor
+
+    # Should force the location of c0
+    c0_constrained = False
+    for i, constraint in enumerate(constraints):  # pragma: no branch
+        if (isinstance(constraint, LocationConstraint)  # pragma: no branch
+                and constraint.vertex is c0
+                and constraint.location == (0, 0)):
+            c0_constrained = True
+            del constraints[i]
+            break
+    assert c0_constrained
+
+    # If reinjection is used, a reinjection core should have been added for
+    # each chip. Record it in a dict {(x, y): _ReinjectionCore, ...}
+    reinjection_cores = {}
+    for i, constraint in reversed(  # pragma: no branch
+            list(enumerate(constraints))):
+        if (isinstance(constraint, LocationConstraint)  # pragma: no branch
+                and isinstance(constraint.vertex, _ReinjectionCore)):
+            reinjection_cores[constraint.location] = constraint.vertex
+            del constraints[i]
+
     if record_reinjected:
-        assert len(constraints) == 2
+        # Should have one reinjection core per chip
+        assert set(reinjection_cores) == set(e.machine)
     else:
-        assert len(constraints) == 1
+        assert len(reinjection_cores) == 0
 
-    mock_place.reset_mock()
-    mock_allocate.reset_mock()
-    mock_route.reset_mock()
+    # No other constraints should exist
+    assert len(constraints) == 0
 
-    # Called again, nothing should be called
-    e.place_and_route(place=mock_place,
-                      allocate=mock_allocate,
-                      route=mock_route)
-    assert not mock_place.called
-    assert not mock_allocate.called
-    assert not mock_route.called
+    # Check that recording cores were not added to chips which already had a
+    # core on.
+    router_recording_cores = set(e._placements).difference(
+        set([c0, c1]).union(set(itervalues(reinjection_cores)))
+    )
+    core_placements = set([e._placements[c0], e._placements[c1]])
+    assert core_placements.isdisjoint(  # pragma: no branch
+        set(e._placements[c] for c in router_recording_cores))
 
-    # Setting the placements should cause others to run
-    e.placements = None
-    e.place_and_route(place=mock_place,
-                      allocate=mock_allocate,
-                      route=mock_route)
-    assert mock_place.called
-    assert mock_allocate.called
-    assert mock_route.called
-    mock_place.reset_mock()
-    mock_allocate.reset_mock()
-    mock_route.reset_mock()
+    # Check that all chips have a router-recording vertex if reinjection is
+    # used but otherwise no cores have been added.
+    if record_reinjected:
+        all_used_chips = core_placements.union(
+            set(e._placements[c] for c in router_recording_cores))
+        assert all_used_chips == set(e.machine)
+    else:
+        assert len(router_recording_cores) == 0
 
-    # Setting the allocations should cause allocation and routing
-    e.allocations = None
-    e.place_and_route(place=mock_place,
-                      allocate=mock_allocate,
-                      route=mock_route)
-    assert not mock_place.called
-    assert mock_allocate.called
-    assert mock_route.called
-    mock_allocate.reset_mock()
-    mock_route.reset_mock()
+    # In the placements and allocations reported we should have include the
+    # extra cores for recording and reinjection.
+    assert set(e._placements) == set(e._allocations)
 
-    # Setting the routes should just cause routing to run
-    e.routes = None
-    e.place_and_route(place=mock_place,
-                      allocate=mock_allocate,
-                      route=mock_route)
-    assert not mock_place.called
-    assert not mock_allocate.called
-    assert mock_route.called
-    mock_route.reset_mock()
+    # The routes generated should correspond to the flows created
+    assert set(e._routes) == set([f0])
 
-    # Creating a core should reset everything
-    core = e.new_core()
-    e.place_and_route(place=mock_place,
-                      allocate=mock_allocate,
-                      route=mock_route)
-    assert mock_place.called
-    assert mock_allocate.called
-    assert mock_route.called
-    mock_place.reset_mock()
-    mock_allocate.reset_mock()
-    mock_route.reset_mock()
-
-    # Creating a flow should reset the routes
-    e.new_flow(core, core)
-    e.place_and_route(place=mock_place,
-                      allocate=mock_allocate,
-                      route=mock_route)
-    assert not mock_place.called
-    assert not mock_allocate.called
-    assert mock_route.called
-    mock_route.reset_mock()
+    # Finally, check the placements, allocations and routes reported back only
+    # include user-created vertices.
+    assert set(e.placements) == set([c0, c1])
+    assert set(e.allocations) == set([c0, c1])
+    assert set(e.routes) == set([f0])
 
 
 @pytest.mark.parametrize("router_access_core", [True, False])
@@ -732,28 +743,6 @@ def test_construct_core_commands(router_access_core):
             assert ref_cmd1 not in commands
 
 
-def test_core_chip():
-    # Make sure specifying the location of each core works
-    mock_mc = Mock()
-    mock_mc.get_machine.return_value = Machine(2, 2)
-
-    e = Experiment(mock_mc)
-
-    v00 = e.new_core(0, 0)
-    v01 = e.new_core(0, 1)
-    v10 = e.new_core(1, 0)
-    v11 = e.new_core(1, 1)
-
-    e.place_and_route()
-
-    assert e.placements == {
-        v00: (0, 0),
-        v01: (0, 1),
-        v10: (1, 0),
-        v11: (1, 1),
-    }
-
-
 def test_core_chip_incomplete():
     # If only X or only Y are specified, things should fail
     mock_mc = Mock()
@@ -766,63 +755,6 @@ def test_core_chip_incomplete():
         e.new_core(chip_y=0)
 
 
-@pytest.mark.parametrize("reinjection_used", [True, False])
-def test_add_router_recording_cores(reinjection_used):
-    # Make sure this internal utility adds extra cores only when required.
-    mock_mc = Mock()
-    e = Experiment(mock_mc)
-
-    machine = Machine(2, 2)
-    mock_mc.get_machine.return_value = machine
-
-    core0 = e.new_core()
-    core1 = e.new_core()
-    e.placements = {core0: (0, 0),
-                    core1: (0, 0)}
-    e.record_sent = True
-    e.record_blocked = True
-    e.record_received = True
-    e.place_and_route()
-
-    # If only recording core-specific values, no extra cores should appear.
-    (cores, router_recording_cores,
-     placements, allocations, routes) = \
-        e._add_router_recording_cores()
-    assert cores == [core0, core1]
-    assert router_recording_cores == set()
-    assert placements == {core0: (0, 0), core1: (0, 0)}
-
-    # If recording any router registers, a core must be allocated on every
-    # chip, creating new ones when required.
-    e.record_external_multicast = True
-    e.reinject_packets = reinjection_used
-    (cores, router_recording_cores,
-     placements, allocations, routes) =\
-        e._add_router_recording_cores()
-
-    # Should have three extra cores, one for each unused chip.
-    assert len(cores) == 5
-
-    # The original cores should still be there
-    assert core0 in cores
-    assert core1 in cores
-
-    # There should be a router recording cores on each chip
-    assert sorted(placements[c] for c in router_recording_cores) == \
-        sorted(machine)
-
-    # The core used on (0, 0) should be one we put there, not a new core
-    assert (core0 in router_recording_cores) ^ \
-        (core1 in router_recording_cores)
-
-    # The newly added cores should be on core 1 unless reinjection is used
-    # in which case they should be on core 2.
-    assert all(a[Cores].start == (2 if reinjection_used else 1)
-               and a[Cores].stop == (3 if reinjection_used else 2)
-               for c, a in iteritems(allocations)
-               if c not in (core0, core1))
-
-
 def test_get_core_record_lookup():
     # Make sure this internal utility produces appropriate results.
     e = Experiment(Mock())
@@ -831,7 +763,8 @@ def test_get_core_record_lookup():
     core0 = e.new_core()
     core1 = e.new_core()
     cores = [core0, core1]
-    placements = {core0: (0, 0), core1: (0, 0)}
+    e._placements = {core0: (0, 0), core1: (0, 0)}
+    e._router_recording_cores = set()
 
     # Two flows, one connected loop-back, one connected to the other core.
     flow0 = e.new_flow(core0, core0)
@@ -842,7 +775,7 @@ def test_get_core_record_lookup():
     # If nothing is being recorded, the sets should just contain permanent
     # counters
     cores_records = e._get_core_record_lookup(
-        cores, set(), placements, cores_source_flows, cores_sink_flows)
+        cores, cores_source_flows, cores_sink_flows)
     assert cores_records == {
         core0: [(core0, Counters.deadlines_missed)],
         core1: [(core1, Counters.deadlines_missed)],
@@ -852,7 +785,7 @@ def test_get_core_record_lookup():
     e.record_sent = True
     e.record_received = True
     cores_records = e._get_core_record_lookup(
-        cores, set(), placements, cores_source_flows, cores_sink_flows)
+        cores, cores_source_flows, cores_sink_flows)
     assert cores_records == {
         core0: [(core0, Counters.deadlines_missed),
                 (flow0, Counters.sent), (flow1, Counters.sent),
@@ -863,12 +796,10 @@ def test_get_core_record_lookup():
 
     # If any routing table entries are present, they should be added to
     # anything in the router_recording_cores lookup.
-    router_recording_cores = set([core0])
+    e._router_recording_cores = set([core0])
     e.record_external_multicast = True
     cores_records = e._get_core_record_lookup(
         cores,
-        router_recording_cores,
-        placements,
         cores_source_flows,
         cores_sink_flows)
     assert cores_records == {
@@ -946,14 +877,12 @@ def test_run(auto_create_group, samples_per_group, num_cores,
 
     e.reinject_packets = reinject_packets
 
-    # Create example cores
-    cores = [e.new_core() for _ in range(num_cores)]
+    # Create example cores. Cores are placed on sequential chips along the
+    # x-axis.
+    cores = [e.new_core(x, 0) for x in range(num_cores)]
     for c in cores:
         for _ in range(num_flows_per_core):
             e.new_flow(c, c)
-
-    # Cores are placed on sequential chips along the x-axis
-    e.placements = {c: (x, 0) for x, c in enumerate(cores)}
 
     # Create example groups
     for num_samples in samples_per_group:
@@ -980,7 +909,9 @@ def test_run(auto_create_group, samples_per_group, num_cores,
     mock_mc.application.assert_called_once_with(0x33)
 
     # If reinjection is enabled, the binary should have been loaded
-    reinjector_loaded = any("reinjector.aplx" in call[1][0]
+    print([call[1][0] for call in mock_mc.load_application.mock_calls])
+    reinjector_loaded = any((len(call[1][0]) == 1
+                             and "reinjector.aplx" in list(call[1][0])[0])
                             for call in mock_mc.load_application.mock_calls)
     if reinject_packets:
         assert reinjector_loaded
@@ -1000,11 +931,7 @@ def test_run(auto_create_group, samples_per_group, num_cores,
             # Just the status value and deadlines_missed
             result_size = (1 + sum(samples_per_group)) * 4
         size = max(cmds_size, result_size)
-        if reinject_packets:
-            # During packet reinjection, core 1 is used.
-            core_num = 2
-        else:
-            core_num = 1
+        core_num = e._allocations[core][Cores].start
         mock_mc.sdram_alloc_as_filelike.assert_any_call(size, x=x, y=0,
                                                         tag=core_num)
 
