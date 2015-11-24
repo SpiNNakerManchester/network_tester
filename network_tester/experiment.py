@@ -184,6 +184,8 @@ class Experiment(object):
             >>> # probability each timestep
             >>> c2.probability = 0.5
 
+        :ref:`Renamed from new_vertex in v0.2.0. <v0_1_x_upgrade>`
+
         Parameters
         ----------
         chip_x : int or None
@@ -223,6 +225,14 @@ class Experiment(object):
 
         return c
 
+    def new_vertex(self, name=None, chip=None):
+        """Warn users of old code of API incompatibility."""
+        raise APIChangedError(
+            "e.new_vertex(name, (x, y)) is now "
+            "e.new_core(x, y, name)",
+            (0, 2, 0)
+        )
+
     def new_flow(self, source, sinks, weight=1.0, name=None):
         """Create a new flow.
 
@@ -244,6 +254,8 @@ class Experiment(object):
 
             >>> # Flow f0 will generate a packet in 80% of timesteps
             >>> f0.probability = 0.8
+
+        :ref:`Renamed from new_net in v0.2.0. <v0_1_x_upgrade>`
 
         Parameters
         ----------
@@ -278,6 +290,14 @@ class Experiment(object):
 
         self._flows.append(f)
         return f
+
+    def new_net(self, *args, **kwargs):
+        """Warn users of old code of API incompatibility."""
+        raise APIChangedError(
+            "e.new_net(...) is now "
+            "e.new_flow(...)",
+            (0, 2, 0)
+        )
 
     def new_group(self, name=None):
         """Define a new experimental group.
@@ -350,6 +370,9 @@ class Experiment(object):
             sync during each group's execution. Further, the barrier
             synchronisation does not give any guarantees about how
             closely-synchronised the timers will be at the start of each run.
+
+        :ref:`The place_and_route method was removed in v0.2.0 and its
+        functionality merged into this method. <v0_1_x_upgrade>`
 
         Parameters
         ----------
@@ -755,6 +778,14 @@ class Experiment(object):
                              allocations=self._allocations,
                              **allocate_kwargs)
 
+    def place_and_route(self, *args, **kwargs):
+        """Warn users of old code of API incompatibility."""
+        raise APIChangedError(
+            "e.place_and_route(...) has been merged into"
+            "e.run(...)",
+            (0, 2, 0)
+        )
+
     @property
     def placements(self):
         """A dictionary {:py:class:`Core`: (x, y), ...}, or None.
@@ -763,10 +794,25 @@ class Experiment(object):
         :py:meth:`.run`.
 
         See also :py:func:`rig.place_and_route.place`.
+
+        :ref:`This attribute was made read-only in v0.2.0. <v0_1_x_upgrade>`
         """
-        # Filter out cores which were not created by the user.
-        return {core: chip for core, chip in iteritems(self._placements)
-                if core in self._cores}
+        if self._placements is None:
+            raise AttributeError("Placements not available until "
+                                 "after calling Experiment.run()")
+        else:
+            # Filter out cores which were not created by the user.
+            return {core: chip for core, chip in iteritems(self._placements)
+                    if core in self._cores}
+
+    @placements.setter
+    def placements(self, *args, **kwargs):
+        """Warn users of old code of API incompatibility."""
+        raise APIChangedError(
+            "e.placements is read-only, "
+            "set Core.chip for all cores instead.",
+            (0, 2, 0)
+        )
 
     @property
     def allocations(self):
@@ -777,11 +823,26 @@ class Experiment(object):
         the core allocated.
 
         See also :py:func:`rig.place_and_route.allocate`.
+
+        :ref:`This attribute was made read-only in v0.2.0. <v0_1_x_upgrade>`
         """
-        # Filter out cores which were not created by the user.
-        return {core: allocation
-                for core, allocation in iteritems(self._allocations)
-                if core in self._cores}
+        if self._allocations is None:
+            raise AttributeError("Allocations not available until "
+                                 "after calling Experiment.run()")
+        else:
+            # Filter out cores which were not created by the user.
+            return {core: allocation
+                    for core, allocation in iteritems(self._allocations)
+                    if core in self._cores}
+
+    @allocations.setter
+    def allocations(self, *args, **kwargs):
+        """Warn users of old code of API incompatibility."""
+        raise APIChangedError(
+            "e.allocations is read-only, "
+            "use custom allocator instead.",
+            (0, 2, 0)
+        )
 
     @property
     def routes(self):
@@ -791,8 +852,23 @@ class Experiment(object):
         Defines the route used for each flow.
 
         See also :py:func:`rig.place_and_route.route`.
+
+        :ref:`This attribute was made read-only in v0.2.0. <v0_1_x_upgrade>`
         """
-        return self._routes
+        if self._routes is None:
+            raise AttributeError("Routes not available until "
+                                 "after calling Experiment.run()")
+        else:
+            return self._routes
+
+    @routes.setter
+    def routes(self, *args, **kwargs):
+        """Warn users of old code of API incompatibility."""
+        raise APIChangedError(
+            "e.routes is read-only, "
+            "use custom router instead.",
+            (0, 2, 0)
+        )
 
     def _any_router_registers_used(self):
         """Are any router registers (including reinjection counters) being
@@ -1119,6 +1195,9 @@ class Core(object):
 
     See :ref:`core parameters <core-attributes>` and :ref:`flow parameters
     <flow-attributes>` for experimental parameters associated with cores.
+
+
+    :ref:`Renamed from Vertex in v0.2.0. <v0_1_x_upgrade>`
     """
 
     def __init__(self, experiment, name, chip=None):
@@ -1171,6 +1250,8 @@ class Flow(RigNet):
 
     See :ref:`flow parameters <flow-attributes>` for experimental parameters
     associated with flows.
+
+    :ref:`Renamed from Net in v0.2.0. <v0_1_x_upgrade>`
     """
 
     def __init__(self, experiment, name, *args, **kwargs):
@@ -1269,3 +1350,31 @@ class Group(object):
             return 1
         else:
             return run_steps // interval_steps
+
+
+class APIChangedError(AttributeError):
+    """
+    Exception thrown when an old (removed) API is used.
+    """
+
+    """
+    The base URL of the online documentation.
+    """
+    DOCUMENTATION_BASE_URL = "http://network-tester.readthedocs.org/en/stable"
+
+    """
+    The URL of the documentation page documenting changes introduced in
+    specific versions of the API.
+    """
+    BREAKING_VERSION_DOCUMENTATION_URL = {
+        (0, 2, 0): "/upgrading_from_0_1_x.html",
+    }
+
+    def __init__(self, message, breaking_version):
+        full_message = "{} (Changed in v{}, see {}{})".format(
+            message,
+            ".".join(map(str, breaking_version)),
+            self.DOCUMENTATION_BASE_URL,
+            self.BREAKING_VERSION_DOCUMENTATION_URL[breaking_version]
+        )
+        super(APIChangedError, self).__init__(full_message)

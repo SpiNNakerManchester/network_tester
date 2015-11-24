@@ -418,6 +418,12 @@ The :py:class:`Core`, :py:class:`Flow` and :py:class:`Group` Classes
     .. attribute:: name
         
         The human-readable name of this core.
+    
+    .. attribute:: chip
+        
+        The (x, y) coordinate of the chip this core should reside on.
+        Alternatively may be set to None if the core should be placed
+        automatically on a suitable chip when the experiment is run.
 
 .. autoclass:: Flow()
     :members:

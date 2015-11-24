@@ -1,3 +1,4 @@
+
 SpiNNaker 'Network Tester' Documentation
 ========================================
 
@@ -36,6 +37,7 @@ API Reference
    :maxdepth: 3
    
    api
+   upgrading_from_0_1_x
 
 
 

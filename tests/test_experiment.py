@@ -15,7 +15,7 @@ from rig.place_and_route.constraints import \
     ReserveResourceConstraint, LocationConstraint
 
 from network_tester.experiment import \
-    Experiment, Core, Flow, Group, _ReinjectionCore
+    Experiment, Core, Flow, Group, _ReinjectionCore, APIChangedError
 
 from network_tester.commands import NT_CMD
 
@@ -511,6 +511,15 @@ def test_place_and_route(record_reinjected):
     c1 = e.new_core()
     f0 = e.new_flow(c0, c1)
     e.record_reinjected = record_reinjected
+
+    # Prior to place-and-route the placements, allocations and routes should
+    # not be available
+    with pytest.raises(AttributeError):
+        e.placements
+    with pytest.raises(AttributeError):
+        e.allocations
+    with pytest.raises(AttributeError):
+        e.routes
 
     e._place_and_route(place=mock_place,
                        allocate=mock_allocate,
@@ -1033,3 +1042,22 @@ def test_run_callbacks():
     assert len(before_load_calls) == 1
     assert len(before_group_calls) == num_groups
     assert len(before_read_results_calls) == 1
+
+
+def test_api_changed_errors():
+    # Make sure all API-change errors work
+    mock_mc = Mock()
+    e = Experiment(mock_mc)
+
+    with pytest.raises(APIChangedError):
+        e.new_vertex()
+    with pytest.raises(APIChangedError):
+        e.new_net()
+    with pytest.raises(APIChangedError):
+        e.place_and_route()
+    with pytest.raises(APIChangedError):
+        e.placements = {}
+    with pytest.raises(APIChangedError):
+        e.allocations = {}
+    with pytest.raises(APIChangedError):
+        e.routes = {}
