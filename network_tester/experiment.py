@@ -923,7 +923,7 @@ class Experiment(object):
         .. warning::
 
             This method is now deprecated, users should use
-            :py:meth:`.system_info` instead. Also, as of v0.3.0, users should
+            :py:attr:`.system_info` instead. Also, as of v0.3.0, users should
             *not* modify this object: all changes are now ignored.
         """
         warnings.warn(
