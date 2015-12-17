@@ -4,7 +4,7 @@ import sys
 with open("network_tester/version.py", "r") as f:
     exec(f.read())
 
-requirements = ["rig", "numpy>1.6", "six"]
+requirements = ["rig>=0.11.0", "numpy>1.6", "six"]
 if sys.version_info < (3, 4, 0):
     # Python versions < 3.4 require "enum34" to be installed
     requirements.append("enum34")

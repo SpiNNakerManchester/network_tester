@@ -2,13 +2,19 @@ import pytest
 
 import struct
 
+import warnings
+
 from mock import Mock
 
 from six import itervalues
 
 from rig.netlist import Net as RigNet
 
-from rig.machine import Machine, Cores
+from rig.machine_control.machine_controller import SystemInfo, ChipInfo
+from rig.machine_control.consts import AppState
+from rig.links import Links
+
+from rig.place_and_route import Cores
 
 from rig.place_and_route import place, allocate, route
 from rig.place_and_route.constraints import \
@@ -407,33 +413,64 @@ def test_new_flow():
     assert flow.weight == 123
 
 
-def test_machine(monkeypatch):
-    # Make sure lazy-loading of the machine works
-    mock_machine = Mock()
+def test_system_info(monkeypatch):
+    # Make sure lazy-loading of the system_info works
+    mock_system_info = Mock()
     mock_mc = Mock()
-    mock_mc.get_machine.return_value = mock_machine
+    mock_mc.get_system_info.return_value = mock_system_info
     e = Experiment(mock_mc)
 
-    # First time the machine should be fetched
-    assert not mock_mc.get_machine.called
-    assert e.machine is mock_machine
-    assert mock_mc.get_machine.called
-    mock_mc.get_machine.reset_mock()
+    # First time the system info should be fetched
+    assert not mock_mc.get_system_info.called
+    assert e.system_info is mock_system_info
+    assert mock_mc.get_system_info.called
+    mock_mc.get_system_info.reset_mock()
 
     # Next time it shouldn't
-    assert e.machine is mock_machine
-    assert not mock_mc.get_machine.called
+    assert e.system_info is mock_system_info
+    assert not mock_mc.get_system_info.called
 
     # It shouldn't if set manually either...
     mock_machine2 = Mock()
-    e.machine = mock_machine2
-    assert e.machine is mock_machine2
-    assert not mock_mc.get_machine.called
+    e.system_info = mock_machine2
+    assert e.system_info is mock_machine2
+    assert not mock_mc.get_system_info.called
 
     # It should if reset manually
-    e.machine = None
+    e.system_info = None
+    assert e.system_info is mock_system_info
+    assert mock_mc.get_system_info.called
+
+
+def test_machine(monkeypatch):
+    # Make sure requesting the machine works, is read-only and produces a
+    # deprecation warning.
+    from network_tester import experiment
+    mock_system_info = Mock()
+    mock_machine = Mock()
+    mock_build_machine = Mock(return_value=mock_machine)
+    mock_mc = Mock()
+    monkeypatch.setattr(experiment, "build_machine", mock_build_machine)
+
+    e = Experiment(mock_mc)
+    e.system_info = mock_system_info
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+
+        # Machine object should be returned built from the system info.
+        assert not mock_build_machine.called
+        assert e.machine is mock_machine
+        mock_build_machine.called_once_with(mock_system_info)
+
+        # Should be flagged as deprecated
+        assert len(w) == 1
+        assert issubclass(w[0].category, DeprecationWarning)
+
+    # Machine should be regenerated every time (i.e. is explicitly read-only)
+    mock_build_machine.reset_mock()
     assert e.machine is mock_machine
-    assert mock_mc.get_machine.called
+    mock_build_machine.called_once_with(mock_system_info)
 
 
 @pytest.mark.parametrize("router_register", [
@@ -501,7 +538,15 @@ def test_reinjection_used(reinjection_register):
 @pytest.mark.parametrize("record_reinjected", [True, False])
 def test_place_and_route(record_reinjected):
     mock_mc = Mock()
-    mock_mc.get_machine.return_value = Machine(2, 2)
+    mock_mc.get_system_info.return_value = SystemInfo(2, 2, {
+        (x, y): ChipInfo(num_cores=18,
+                         core_states=[AppState.run] + [AppState.idle] * 17,
+                         working_links=set(Links),
+                         largest_free_sdram_block=110*1024*1024,
+                         largest_free_sram_block=1024*1024)
+        for x in range(2)
+        for y in range(2)
+    })
     mock_place = Mock(side_effect=place)
     mock_allocate = Mock(side_effect=allocate)
     mock_route = Mock(side_effect=route)
@@ -567,7 +612,7 @@ def test_place_and_route(record_reinjected):
 
     if record_reinjected:
         # Should have one reinjection core per chip
-        assert set(reinjection_cores) == set(e.machine)
+        assert set(reinjection_cores) == set(e.system_info)
     else:
         assert len(reinjection_cores) == 0
 
@@ -588,7 +633,7 @@ def test_place_and_route(record_reinjected):
     if record_reinjected:
         all_used_chips = core_placements.union(
             set(e._placements[c] for c in router_recording_cores))
-        assert all_used_chips == set(e.machine)
+        assert all_used_chips == set(e.system_info)
     else:
         assert len(router_recording_cores) == 0
 
@@ -755,7 +800,6 @@ def test_construct_core_commands(router_access_core):
 def test_core_chip_incomplete():
     # If only X or only Y are specified, things should fail
     mock_mc = Mock()
-    mock_mc.get_machine.return_value = Machine(2, 2)
     e = Experiment(mock_mc)
 
     with pytest.raises(ValueError):
@@ -836,21 +880,27 @@ def test_run(auto_create_group, samples_per_group, num_cores,
              num_flows_per_core, error, error_code, record, reinject_packets):
     """Make sure that the run command carries out an experiment as would be
     expected."""
-    machine = Machine(3, 1)
+    system_info = SystemInfo(3, 1, {
+        (x, y): ChipInfo(num_cores=18,
+                         core_states=[AppState.run] + [AppState.idle] * 17,
+                         working_links=set(Links),
+                         largest_free_sdram_block=110*1024*1024,
+                         largest_free_sram_block=1024*1024)
+        for x in range(3)
+        for y in range(1)
+    })
 
     mock_mc = Mock()
-    mock_mc.get_machine.return_value = machine
+    mock_mc.get_system_info.return_value = system_info
 
     mock_application_ctx = Mock()
     mock_application_ctx.__enter__ = Mock()
     mock_application_ctx.__exit__ = Mock()
     mock_mc.application.return_value = mock_application_ctx
 
-    mock_mc.get_machine.return_value = machine
-
     if reinject_packets:
         # If reinjecting, a core is added to every chip
-        mock_mc.wait_for_cores_to_reach_state.return_value = len(list(machine))
+        mock_mc.wait_for_cores_to_reach_state.return_value = len(system_info)
     else:
         # If not reinjecting, only the user-defined cores exist
         mock_mc.wait_for_cores_to_reach_state.return_value = num_cores
@@ -955,19 +1005,25 @@ def test_run_callbacks():
     """Make sure that the run command's callbacks occur at the right time."""
     num_groups = 3
 
-    machine = Machine(3, 1)
+    system_info = SystemInfo(3, 1, {
+        (x, y): ChipInfo(num_cores=18,
+                         core_states=[AppState.run] + [AppState.idle] * 17,
+                         working_links=set(Links),
+                         largest_free_sdram_block=110*1024*1024,
+                         largest_free_sram_block=1024*1024)
+        for x in range(3)
+        for y in range(1)
+    })
 
     mock_mc = Mock()
-    mock_mc.get_machine.return_value = machine
+    mock_mc.get_system_info.return_value = system_info
 
     mock_application_ctx = Mock()
     mock_application_ctx.__enter__ = Mock()
     mock_application_ctx.__exit__ = Mock()
     mock_mc.application.return_value = mock_application_ctx
 
-    mock_mc.get_machine.return_value = machine
-
-    mock_mc.wait_for_cores_to_reach_state.return_value = len(list(machine))
+    mock_mc.wait_for_cores_to_reach_state.return_value = len(system_info)
 
     def mock_sdram_file_read(size):
         return b"\0\0\0\0" + b"\0"*(size - 4)

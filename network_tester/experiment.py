@@ -6,11 +6,13 @@ import time
 
 import logging
 
+import warnings
+
 from collections import OrderedDict
 
 from six import iteritems, itervalues, integer_types
 
-from rig.machine import Cores
+from rig.place_and_route import Cores
 
 from rig.machine_control import MachineController
 
@@ -19,10 +21,11 @@ from rig.netlist import Net as RigNet
 from rig.place_and_route import place, allocate, route
 
 from rig.place_and_route.utils import \
+    build_machine, build_core_constraints, \
     build_routing_tables, build_application_map
 
 from rig.place_and_route.constraints import \
-    ReserveResourceConstraint, LocationConstraint
+    LocationConstraint
 
 from network_tester.commands import Commands
 
@@ -87,10 +90,10 @@ class Experiment(object):
         else:
             self._mc = hostname_or_machine_controller
 
-        # A cached reference to the SpiNNaker machine the experiment will run
-        # in. To be accessed via .machine which automatically fetches the
-        # machine the first time it is requested.
-        self._machine = None
+        # A cached reference to the SpiNNaker system info for the machine the
+        # experiment will run on. To be accessed via .system_info which
+        # automatically fetches the info the first time it is requested.
+        self._system_info = None
 
         # A set of placements, allocations and routes for the
         # traffic-generating/consuming cores.
@@ -701,9 +704,12 @@ class Experiment(object):
         vertices_resources = {core: {Cores: 1} for core in
                               self._cores}
 
-        # Reserve the monitor processor for each chip
+        # Generate a Machine object and reserve all in-use cores
+        machine = build_machine(self.system_info)
+        core_constraints = build_core_constraints(self.system_info)
+
         constraints = constraints or []
-        constraints += [ReserveResourceConstraint(Cores, slice(0, 1))]
+        constraints += core_constraints
 
         # Force the placements of cores whose positions are pre-defined
         constraints.extend(
@@ -715,7 +721,7 @@ class Experiment(object):
         # Add reinjection cores, one per chip, if required
         self._reinjection_cores = set()
         if self._reinjection_used():
-            for chip in self.machine:
+            for chip in self.system_info:
                 core = _ReinjectionCore()
                 vertices_resources[core] = {Cores: 1}
                 self._reinjection_cores.add(core)
@@ -725,7 +731,7 @@ class Experiment(object):
         logger.info("Placing cores...")
         self._placements = place(vertices_resources=vertices_resources,
                                  nets=self._flows,
-                                 machine=self.machine,
+                                 machine=machine,
                                  constraints=constraints,
                                  **place_kwargs)
 
@@ -746,7 +752,7 @@ class Experiment(object):
             # Create a new core to record router values on every chip without a
             # core already available for recording.
             num_extra_cores = 0
-            for chip in self.machine:
+            for chip in self.system_info:
                 if chip not in recorded_chips:
                     core = Core(self,
                                 "router recording core ({}, {})".format(*chip),
@@ -763,7 +769,7 @@ class Experiment(object):
         logger.info("Allocating cores...")
         self._allocations = allocate(vertices_resources=vertices_resources,
                                      nets=self._flows,
-                                     machine=self.machine,
+                                     machine=machine,
                                      constraints=constraints,
                                      placements=self._placements,
                                      **allocate_kwargs)
@@ -772,7 +778,7 @@ class Experiment(object):
         logger.info("Routing flows...")
         self._routes = route(vertices_resources=vertices_resources,
                              nets=self._flows,
-                             machine=self.machine,
+                             machine=machine,
                              constraints=constraints,
                              placements=self._placements,
                              allocations=self._allocations,
@@ -819,8 +825,8 @@ class Experiment(object):
         """A dictionary {:py:class:`Core`: {resource: slice}, ...} or None.
 
         Defines the resources allocated to each core. This will include an
-        allocation of the :py:class:`~rig.machine.Cores` resource representing
-        the core allocated.
+        allocation of the :py:class:`~rig.place_and_route.Cores` resource
+        representing the core allocated.
 
         See also :py:func:`rig.place_and_route.allocate`.
 
@@ -892,25 +898,40 @@ class Experiment(object):
                     for g in self._groups))
 
     @property
-    def machine(self):
-        """The :py:class:`~rig.machine.Machine` object describing the SpiNNaker
-        system under test.
+    def system_info(self):
+        """The :py:class:`~rig.machine_control.machine_controller.SystemInfo`
+        object describing the SpiNNaker system under test.
 
-        This property caches the machine description read from the machine to
-        avoid repeatedly polling the SpiNNaker system.
-
-        Users may modify this machine to influence the automatic
-        place-and-route tools (e.g. by clearing the set of dead links to force
-        apparently dead links to be used).
+        This value is fetched from the machine once and cached for all future
+        accesses. This value may be modified to influence the place-and-route
+        processes.
         """
-        if self._machine is None:
-            logger.info("Getting SpiNNaker machine information...")
-            self._machine = self._mc.get_machine()
-        return self._machine
+        if self._system_info is None:
+            logger.info("Getting SpiNNaker system information...")
+            self._system_info = self._mc.get_system_info()
+        return self._system_info
 
-    @machine.setter
-    def machine(self, value):
-        self._machine = value
+    @system_info.setter
+    def system_info(self, value):
+        self._system_info = value
+
+    @property
+    def machine(self):
+        """**Deprecated.** The :py:class:`~rig.place_and_route.Machine` object
+        describing the SpiNNaker system under test.
+
+        .. warning::
+
+            This method is now deprecated, users should use
+            :py:meth:`.system_info` instead. Also, as of v0.3.0, users should
+            *not* modify this object: all changes are now ignored.
+        """
+        warnings.warn(
+            "MachineController.get_machine() is deprecated and changes are "
+            "now ignored as of v0.3.0. Use get_system_info() instead.",
+            DeprecationWarning)
+
+        return build_machine(self._system_info)
 
     def _construct_core_commands(self, core, source_flows, sink_flows,
                                  flow_keys, records, router_access_core):
