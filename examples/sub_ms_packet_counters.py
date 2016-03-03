@@ -24,6 +24,9 @@ they are plotted on screen.
 """
 import sys
 
+# For Python 2 and 3 compatibility
+from six.moves import input
+
 from network_tester import Experiment
 
 # Take the hostname of the remote machine from the command line
