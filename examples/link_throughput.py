@@ -22,6 +22,7 @@ import sys
 
 import numpy as np
 
+from rig.machine_control import MachineController
 from rig.links import Links
 from rig.geometry import spinn5_chip_coord, spinn5_fpga_link
 
@@ -37,7 +38,8 @@ logging.basicConfig(level=logging.DEBUG)
 ################################################################################
 
 # Run the experiment against the machine given on the commandline
-e = Experiment(sys.argv[1])
+mc = MachineController(sys.argv[1])
+e = Experiment(mc)
 
 # If some links are dead they will not be included in the experiment.
 if list(e.system_info.dead_links()):
@@ -83,7 +85,9 @@ for link, alternate_dimension in [(Links.east, 0), (Links.west, 0),
                         flow.packets_per_timestep = 1
 
 # The interval between packets being generated on each core
-e.timestep = 2e-6  # 2 microseconds
+# NB: This interval has been experimentally determined to be as short as
+# possible without vast numbers of real-time deadlines being missed.
+e.timestep = 2020e-9  # 2020 nanoseconds
 
 e.router_timeout = 240
 
@@ -112,8 +116,10 @@ e.record_dropped_multicast = True
 
 # Sanity check; if the parameters above don't generate enough traffic to
 # saturate the link, shout!
-if (1.0 / e.timestep) * num_cores * 40.0 / 1024.0 / 1024.0 < 300.0:
-    print("WARNING: Packet generation rate < 300 MBit/s, links may not saturate")
+max_rate = (1.0 / e.timestep) * num_cores * 40.0 / 1024.0 / 1024.0
+if max_rate < 300.0:
+    print("WARNING: Packet generation rate {:0.1f} < 300 MBit/s, "
+          "links may not saturate".format(max_rate))
 
 
 ################################################################################
@@ -203,11 +209,12 @@ for row in range(len(data)):
     data[row]["link"] = link.name
     
     # The coordinates of the (sending) chip with respect to the board it is on
-    data[row]["board_x"], data[row]["board_y"] = spinn5_chip_coord(x, y)
+    data[row]["board_x"], data[row]["board_y"] = spinn5_chip_coord(
+        x, y, *mc.root_chip)
     
     # These columns indicate the FPGA link used or are left as None (i.e. NA)
     # when the link a native SpiNNaker link.
-    fpga_link = spinn5_fpga_link(x, y, link)
+    fpga_link = spinn5_fpga_link(x, y, link, *mc.root_chip)
     if fpga_link is None:
         data[row]["fpga_num"] = None
         data[row]["fpga_link_num"] = None

@@ -11,7 +11,5 @@ The latest version of the binary is checked into the respository meaning most
 users will not need to build it. When changes are made, the binary can be
 recompiled using:
 
-    $ make
+    $ make install
 
-The makefile and library make use of
-[`spinnaker_tools`](https://github.com/SpiNNakerManchester/spinnaker_tools).

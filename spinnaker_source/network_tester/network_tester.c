@@ -95,18 +95,6 @@ static volatile bool dma_in_progress = false;
 )
 
 
-// XXX: Will be included as part of next version of SCAMP/SARK
-// Get a pointer to a tagged allocation. If the "app_id" parameter is zero
-// uses the core's app_id.
-void *sark_tag_ptr (uint tag, uint app_id)
-{
-	if (app_id == 0)
-		app_id = sark_vec->app_id;
-	
-	return (void *) sv->alloc_tag[(app_id << 8) + tag];
-}
-
-
 /**
  * Change the number of sources.
  */
@@ -399,8 +387,10 @@ uint32_t run(uint32_t time_left_steps, bool enable_recording)
 						bool sent;
 						// Retry on back-pressure blocking transmission, if required
 						for (int k = 0; k <= sources[i].num_retries; k++) {
+							// Check to see if the comms controller is able to trasnmit a packet
 							sent = spin1_send_mc_packet(sources[i].key, 0xDEADBEEF,
 							                            sources[i].payload);
+							
 							if (k != 0)
 								sources[i].retry_count++;
 							if (sent)
@@ -634,8 +624,8 @@ void c_main(void)
 {
 	// Work out CPU position
 	uint32_t xy = spin1_get_chip_id();
-	uint32_t x = (xy >> 8) | 0xFF;
-	uint32_t y = (xy >> 0) | 0xFF;
+	uint32_t x = (xy >> 8) & 0xFF;
+	uint32_t y = (xy >> 0) & 0xFF;
 	uint32_t p = spin1_get_core_id();
 	INFO("Starting network_tester on chip %d %d core %d.\n", x, y, p);
 	

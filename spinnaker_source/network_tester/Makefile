@@ -1,15 +1,6 @@
-# The name of the binary to be built 
-APP = network_tester
+APP := network_tester
+THUMB := 0
+include $(SPINN_DIRS)/make/app.make
 
-APP_OUTPUT_DIR = ../../network_tester/binaries/
-BUILD_DIR = build/
-
-OBJECTS = network_tester.o
-#LIBRARIES = -lspin1_api
-
-include $(SPINN_DIRS)/Makefile.common
-
-all: $(APP_OUTPUT_DIR)$(APP).aplx
-
-clean:
-	$(RM) $(OBJECTS) $(BUILD_DIR)$(APP).elf $(BUILD_DIR)$(APP).txt $(APP_OUTPUT_DIR)$(APP).aplx
+install : $(APP).aplx
+	cp $(APP).aplx ../../network_tester/binaries
