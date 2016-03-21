@@ -597,13 +597,13 @@ void interpreter_main(uint commands_ptr, uint arg1)
 			
 			case NT_CMD_CONSUME:
 				// Enables the interrupt on packet arrival
-				vic[VIC_ENABLE] = 1 << CC_RDY_INT;
+				vic[VIC_ENABLE] = 1 << CC_MC_INT;
 				break;
 			
 			case NT_CMD_NO_CONSUME:
 				// Disables the interrupt on packet arrival causing the packets to
 				// back-up in the network.
-				vic[VIC_DISABLE] = 1 << CC_RDY_INT;
+				vic[VIC_DISABLE] = 1 << CC_MC_INT;
 				break;
 			
 			case NT_CMD_SINK_KEY:

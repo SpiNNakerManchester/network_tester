@@ -216,8 +216,8 @@ class Results(object):
         num_cores = len(self._cores)
         totals = self._make_result_array([("core", object)] +
                                          [c.name for c in self._recorded
-                                          if c.source_counter
-                                          or c.sink_counter] +
+                                          if c.source_counter or
+                                          c.sink_counter] +
                                          (["ideal_received"] if
                                           record_sent_receieved else []),
                                          rows_per_sample=num_cores)
@@ -259,8 +259,8 @@ class Results(object):
         totals = self._make_result_array([("flow", object),
                                           ("fan_out", np.uint)] +
                                          [c.name for c in self._recorded
-                                          if c.source_counter
-                                          or c.sink_counter],
+                                          if c.source_counter or
+                                          c.sink_counter],
                                          rows_per_sample=num_flows)
 
         for flow_num, flow in enumerate(self._flows):
@@ -303,8 +303,8 @@ class Results(object):
                                           ("sink_core", object),
                                           ("num_hops", np.uint)] +
                                          [c.name for c in self._recorded
-                                          if c.source_counter
-                                          or c.sink_counter],
+                                          if c.source_counter or
+                                          c.sink_counter],
                                          rows_per_sample=num_sinks)
 
         # Construct a lookup from (flow, sink) to number of hops.

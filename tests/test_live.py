@@ -166,11 +166,11 @@ def test_recipt(experiment):
 
     # Approximately the right number of packets should arrive for each counter
     assert (10 <
-            np.sum(flow_totals[flow_totals["flow"] == flow0]["received"])
-            < 40)
+            np.sum(flow_totals[flow_totals["flow"] == flow0]["received"]) <
+            40)
     assert (60 <
-            np.sum(flow_totals[flow_totals["flow"] == flow1]["received"])
-            < 90)
+            np.sum(flow_totals[flow_totals["flow"] == flow1]["received"]) <
+            90)
 
 
 def test_consume(experiment):
@@ -207,7 +207,7 @@ def test_consume(experiment):
     assert totals_noconsume["dropped_multicast"] > 0
     assert totals_noconsume["received"] == 0
 
-    # During the consuming phase all packets should get through
+    # During the consuming phase (almost) all packets should get through
     assert totals_consume["dropped_multicast"] == 0
     assert totals_consume["received"] >= 95
 

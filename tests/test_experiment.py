@@ -580,10 +580,10 @@ def test_place_and_route(record_reinjected):
     reserved_monitor = False
     for i, constraint in enumerate(constraints):  # pragma: no branch
         if (  # pragma: no branch
-                isinstance(constraint, ReserveResourceConstraint)
-                and constraint.resource is Cores
-                and constraint.reservation == slice(0, 1)
-                and constraint.location is None):
+                isinstance(constraint, ReserveResourceConstraint) and
+                constraint.resource is Cores and
+                constraint.reservation == slice(0, 1) and
+                constraint.location is None):
             reserved_monitor = True
             del constraints[i]
             break
@@ -592,9 +592,9 @@ def test_place_and_route(record_reinjected):
     # Should force the location of c0
     c0_constrained = False
     for i, constraint in enumerate(constraints):  # pragma: no branch
-        if (isinstance(constraint, LocationConstraint)  # pragma: no branch
-                and constraint.vertex is c0
-                and constraint.location == (0, 0)):
+        if (isinstance(constraint, LocationConstraint) and  # pragma: no branch
+                constraint.vertex is c0 and
+                constraint.location == (0, 0)):
             c0_constrained = True
             del constraints[i]
             break
@@ -605,8 +605,8 @@ def test_place_and_route(record_reinjected):
     reinjection_cores = {}
     for i, constraint in reversed(  # pragma: no branch
             list(enumerate(constraints))):
-        if (isinstance(constraint, LocationConstraint)  # pragma: no branch
-                and isinstance(constraint.vertex, _ReinjectionCore)):
+        if (isinstance(constraint, LocationConstraint) and  # pragma: no branch
+                isinstance(constraint.vertex, _ReinjectionCore)):
             reinjection_cores[constraint.location] = constraint.vertex
             del constraints[i]
 
@@ -969,8 +969,8 @@ def test_run(auto_create_group, samples_per_group, num_cores,
 
     # If reinjection is enabled, the binary should have been loaded
     print([call[1][0] for call in mock_mc.load_application.mock_calls])
-    reinjector_loaded = any((len(call[1][0]) == 1
-                             and "reinjector.aplx" in list(call[1][0])[0])
+    reinjector_loaded = any((len(call[1][0]) == 1 and
+                             "reinjector.aplx" in list(call[1][0])[0])
                             for call in mock_mc.load_application.mock_calls)
     if reinject_packets:
         assert reinjector_loaded
