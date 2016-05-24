@@ -12,11 +12,11 @@ The latest version of the binaries are checked into the respository (in
 them.  When changes are made, the binaries for each application can be rebuilt
 using the associated Makefile like so:
 
-    $ make install CFLAGS=-O3
+    $ CFLAGS="-O3" make install
 
 Note that the SARK and SpiNN1 API must also be built with the -O3 optimisation
 level, e.g.
 
     $ cd $SPINN_DIRS
-    $ make clean && make CFLAGS=-O3
+    $ make clean && CFLAGS="-O3" make
     $ cd -
