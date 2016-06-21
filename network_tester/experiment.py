@@ -22,7 +22,11 @@ from rig.place_and_route import place, allocate, route
 
 from rig.place_and_route.utils import \
     build_machine, build_core_constraints, \
-    build_routing_tables, build_application_map
+    build_application_map
+
+from rig.routing_table import \
+    routing_tree_to_tables, build_routing_table_target_lengths, \
+    minimise_tables
 
 from rig.place_and_route.constraints import \
     LocationConstraint
@@ -483,9 +487,15 @@ class Experiment(object):
         # Assign a unique routing key to each flow
         flow_keys = {flow: num << 8
                      for num, flow in enumerate(self._flows)}
-        routing_tables = build_routing_tables(
+
+        # Build routing tables from the generated routes
+        routing_tables = routing_tree_to_tables(
             self._routes,
             {flow: (key, 0xFFFFFF00) for flow, key in iteritems(flow_keys)})
+
+        # Minimise the routing tables, if required
+        target_lengths = build_routing_table_target_lengths(self.system_info)
+        routing_tables = minimise_tables(routing_tables, target_lengths)
 
         network_tester_binary = pkg_resources.resource_filename(
             "network_tester", "binaries/network_tester.aplx")
