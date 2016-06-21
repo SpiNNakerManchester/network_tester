@@ -316,10 +316,10 @@ class Commands(object):
         if self._probability[source_num] != probability:
             self._probability[source_num] = probability
             # Convert to value between 0 and 0xFFFFFFFF
-            if probability == 1.0:
+            if probability >= 1.0:
                 probability = 0xFFFFFFFF
             else:
-                probability = int(round(probability * (1 << 32)))
+                probability = int(round(probability * ((1 << 32) - 1)))
             self._commands.extend([NT_CMD.PROBABILITY | (source_num << 8),
                                    probability])
 
