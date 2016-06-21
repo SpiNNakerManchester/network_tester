@@ -252,18 +252,20 @@ def test_probability():
     a.probability(1, 0.0)
     assert len(a._commands) == 2
 
-    # If should produce command on change
-    a.probability(0, 0.5)
+    # If changed should produce command on change. Note that in this test we
+    # check that very-nearly-one values get rounded up to one. Previously an
+    # off-by-one bug rounded up *past* one.
+    a.probability(0, 0.9999999999999999)
     assert len(a._commands) == 4
     assert a._commands[-2:] == [NT_CMD.PROBABILITY | (0 << 8),
-                                1 << 31]
+                                (1 << 32) - 1]
     a.probability(1, 0.25)
     assert len(a._commands) == 6
     assert a._commands[-2:] == [NT_CMD.PROBABILITY | (1 << 8),
                                 1 << 30]
 
     # No command should be produced on non-change again
-    a.probability(0, 0.5)
+    a.probability(0, 0.9999999999999999)
     a.probability(1, 0.25)
     assert len(a._commands) == 6
 
