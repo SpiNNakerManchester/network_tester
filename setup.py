@@ -4,7 +4,7 @@ import sys
 with open("network_tester/version.py", "r") as f:
     exec(f.read())
 
-requirements = ["rig>=1.0.0,<2.0.0", "numpy>1.6", "six", "enum_compat"]
+requirements = ["rig>=2.0.0,<3.0.0", "numpy>1.6", "six", "enum_compat"]
 
 setup(
     name="network_tester",
