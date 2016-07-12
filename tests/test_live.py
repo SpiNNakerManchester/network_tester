@@ -6,6 +6,8 @@ SpiNNaker application itself.
 
 import pytest
 
+from itertools import chain
+
 import numpy as np
 
 from network_tester.experiment import Experiment
@@ -243,3 +245,42 @@ def test_impossible_deadline(experiment):
 
     # But deadline misses should have been counted
     assert totals["deadlines_missed"] > 0
+
+
+def test_performance(experiment):
+    """This test is designed to detect performance regressions of the compiled
+    binary. The parameters used are derrived from those used by the link
+    throughput example program.
+    """
+    # In the link_throughput experiment, cores either transmit or receive
+    # one of six flows to neighbouring chips.
+    c0 = experiment.new_core(0, 0)
+    c1 = experiment.new_core(0, 1)
+    flows_01 = [experiment.new_flow(c0, c1) for _ in range(6)]
+    flows_10 = [experiment.new_flow(c1, c0) for _ in range(6)]
+
+    # Just as in the throughput experiment, only one flow will be active at one
+    # time
+    flows_01[0].probability = 1.0
+    for flow in chain(flows_01[1:], flows_10):
+        flow.probability = 0.0
+
+    # The speed used by the throughput experiment. Found to be pretty much as
+    # fast as it is possible to go.
+    experiment.timestep = 2020e-9  # 2020 nanoseconds
+
+    experiment.duration = 1.0
+
+    # Bursting is a slower code path
+    experiment.burst_period = experiment.duration
+    experiment.burst_duty = 1.0/3.0
+    experiment.burst_phase = 2.0/3.0
+
+    results = experiment.run(ignore_deadline_errors=True)
+
+    # With a correctly compiled binary, very few (if any) real time deadlines
+    # should be missed
+    total_deadlines = experiment.duration / experiment.timestep
+    missed_deadlines = results.totals()["deadlines_missed"][0]
+    proportion_missed = missed_deadlines / total_deadlines
+    assert proportion_missed < 0.001
