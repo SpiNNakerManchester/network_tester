@@ -15,7 +15,7 @@ which can be set up like so:
 A development installation of `network_tester` can be installed
 using [setuptools](https://pypi.python.org/pypi/setuptools) as usual:
 
-    git clone git@github.com:project-rig/network_tester.git
+    git clone git@github.com:SpiNNakerManchester/network_tester.git
     cd network_tester
     python setup.py develop
 

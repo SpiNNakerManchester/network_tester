@@ -13,7 +13,7 @@ setup(
     package_data={'network_tester': ['binaries/*.aplx']},
 
     # Metadata for PyPi
-    url="https://github.com/project-rig/network_tester",
+    url="https://github.com/SpiNNakerManchester/network_tester",
     author="Jonathan Heathcote",
     description="SpiNNaker network experiment library.",
     license="GPLv2",
